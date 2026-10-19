@@ -34,12 +34,10 @@ def get_drive_service():
 
   if creds_dict and "private_key" in creds_dict:
     pk = str(creds_dict["private_key"])
-    # Tangani escape string \n literal maupun baris baru asli secara presisi
     if "\\n" in pk:
       pk = pk.replace("\\n", "\n")
     pk = pk.replace("\r", "").strip()
 
-    # Pastikan batas header dan footer PEM valid tanpa karakter ekstra
     start_idx = pk.find("-----BEGIN PRIVATE KEY-----")
     end_idx = pk.find("-----END PRIVATE KEY-----")
     if start_idx != -1 and end_idx != -1:
@@ -66,7 +64,6 @@ def sync_parquet_from_gdrive():
     try:
       service = get_drive_service()
 
-      # Cari ID file Parquet di folder Google Drive
       query = f"'{TARGET_GDRIVE_FOLDER_ID}' in parents and name = '{OUTPUT_PARQUET_NAME}' and trashed = false"
       results = (
           service.files().list(q=query, fields="files(id, name)").execute()
@@ -82,7 +79,6 @@ def sync_parquet_from_gdrive():
 
       file_id = items[0]["id"]
 
-      # Unduh file Parquet secara efisien
       request = service.files().get_media(fileId=file_id)
       fh = io.BytesIO()
       downloader = MediaIoBaseDownload(fh, request)
@@ -110,7 +106,6 @@ if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.success("Cache dibersihkan! Mengunduh file Parquet terbaru...")
   st.rerun()
 
-# Unduh Parquet jika belum ada di lokal
 if not os.path.exists(LOCAL_PARQUET_PATH):
   success = sync_parquet_from_gdrive()
   if not success:
@@ -137,9 +132,27 @@ try:
                     WHEN INBOUND_MANIFEST IS NULL OR TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) = '' OR UPPER(INBOUND_MANIFEST) NOT LIKE 'MXG%' THEN NULL
                     ELSE 
                         GREATEST(
-                            CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                            CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                            CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END
+                            CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END,
+                            CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(HVI_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END,
+                            CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END
                         )
                 END AS valid_inbound_date
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
@@ -187,9 +200,27 @@ try:
                     WHEN INBOUND_MANIFEST IS NULL OR TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) = '' OR UPPER(INBOUND_MANIFEST) NOT LIKE 'MXG%' THEN NULL
                     ELSE 
                         GREATEST(
-                            CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                            CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                            CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END
+                            CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END,
+                            CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(HVI_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END,
+                            CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END
                         )
                 END AS valid_inbound_date
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
@@ -349,9 +380,27 @@ try:
                     WHEN INBOUND_MANIFEST IS NULL OR TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) = '' OR UPPER(INBOUND_MANIFEST) NOT LIKE 'MXG%' THEN NULL
                     ELSE 
                         GREATEST(
-                            CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                            CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                            CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END
+                            CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END,
+                            CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(HVI_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END,
+                            CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
+                                COALESCE(
+                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
+                                )
+                            ELSE NULL END
                         )
                 END AS tanggal_max_inbound
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
@@ -370,10 +419,8 @@ try:
 
   df_unrunsheet_detail = conn.execute(unrunsheet_detail_query).fetchdf()
 
-  # Tampilkan Tabel Detail
   st.dataframe(df_unrunsheet_detail, use_container_width=True)
 
-  # Fitur Download CSV
   csv_data = df_unrunsheet_detail.to_csv(index=False).encode("utf-8")
   st.download_button(
       label=f"📥 Download Data CSV UnRunsheet [{selected_aging_group}]",
@@ -406,9 +453,27 @@ try:
                 WHEN INBOUND_MANIFEST IS NULL OR TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) = '' OR UPPER(INBOUND_MANIFEST) NOT LIKE 'MXG%' THEN NULL
                 ELSE 
                     GREATEST(
-                        CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                        CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                        CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END
+                        CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
+                            COALESCE(
+                                TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
+                            )
+                        ELSE NULL END,
+                        CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
+                            COALESCE(
+                                TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                TRY_CAST(HVI_DATE AS TIMESTAMP)
+                            )
+                        ELSE NULL END,
+                        CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
+                            COALESCE(
+                                TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
+                            )
+                        ELSE NULL END
                     )
             END AS Valid_Inbound_Date,
             CASE 
@@ -417,9 +482,27 @@ try:
                         WHEN INBOUND_MANIFEST IS NULL OR TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) = '' OR UPPER(INBOUND_MANIFEST) NOT LIKE 'MXG%' THEN NULL
                         ELSE 
                             GREATEST(
-                                CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                                CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END,
-                                CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP) ELSE NULL END
+                                CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
+                                    COALESCE(
+                                        TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                        TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                        TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
+                                    )
+                                ELSE NULL END,
+                                CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
+                                    COALESCE(
+                                        TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                        TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                        TRY_CAST(HVI_DATE AS TIMESTAMP)
+                                    )
+                                ELSE NULL END,
+                                CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
+                                    COALESCE(
+                                        TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
+                                        TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                        TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
+                                    )
+                                ELSE NULL END
                             )
                     END
                 ) IS NULL THEN 'UnInbound'
