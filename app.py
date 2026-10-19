@@ -27,11 +27,19 @@ LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
 # FUNGSI AKSES GOOGLE DRIVE API & SINKRONISASI PARQUET
 # =========================================================
 def get_drive_service():
-  creds = service_account.Credentials.from_service_account_file(
-      SERVICE_ACCOUNT_FILE, scopes=["https://www.googleapis.com/auth/drive"]
-  )
+  SCOPES = ["https://www.googleapis.com/auth/drive"]
+  # Cek apakah berjalan di Streamlit Cloud dengan secrets
+  if "gcp_service_account" in st.secrets:
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=SCOPES
+    )
+  else:
+    # Jika berjalan di lokal (VS Code) menggunakan file fisik
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
   return build("drive", "v3", credentials=creds)
-
 
 @st.cache_resource
 def sync_parquet_from_gdrive():
