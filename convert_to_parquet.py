@@ -41,7 +41,7 @@ def download_gdrive_folder(service, folder_id, local_path):
             file_name = item['name']
             mime_type = item['mimeType']
             
-            # PENTING: Jangan unduh file parquet output kita sendiri!
+            # Abaikan file output parquet jika ada di folder
             if file_name == OUTPUT_PARQUET:
                 continue
                 
@@ -79,8 +79,6 @@ download_gdrive_folder(service, TARGET_GDRIVE_FOLDER_ID, TEMP_CSV_DIR)
 
 print("\n3. Mengonversi CSV ke Parquet dengan Optimasi Memori DuckDB...")
 con = duckdb.connect()
-
-# Batasi memori DuckDB agar aman di server GitHub Actions (maks 3GB)
 con.execute("PRAGMA memory_limit='3GB';")
 
 csv_pattern = os.path.join(TEMP_CSV_DIR, "**", "*.csv")
@@ -101,7 +99,7 @@ print("Folder CSV sementara di lokal telah dibersihkan.")
 # 4. UPLOAD / UPDATE PARQUET KEMBALI KE GOOGLE DRIVE
 # =========================================================
 print("\n4. Mengunggah file Parquet ke Google Drive...")
-media = MediaFileUpload(OUTPUT_PARQUET, resumable=True)
+media = MediaFileUpload(OUTPUT_PARQUET, mimetype='application/octet-stream', resumable=True)
 
 query = f"'{TARGET_GDRIVE_FOLDER_ID}' in parents and name = '{OUTPUT_PARQUET}' and trashed = false"
 results = service.files().list(q=query, fields="files(id, name)").execute()
@@ -109,14 +107,23 @@ items = results.get('files', [])
 
 if items:
     file_id = items[0]['id']
-    print("Memperbarui file Parquet yang sudah ada di Drive...")
-    service.files().update(fileId=file_id, media_body=media).execute()
-    print("🎉 SUKSES! File Parquet berhasil diperbarui di Google Drive!")
-else:
-    print("Mengunggah file Parquet baru ke Drive...")
-    file_metadata = {
-        'name': OUTPUT_PARQUET,
-        'parents': [TARGET_GDRIVE_FOLDER_ID]
-    }
-    service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
+    print("Menghapus file lama sebelum mengunggah versi baru...")
+    try:
+        service.files().delete(fileId=file_id).execute()
+    except Exception as e:
+        print(f"Info: {e}")
+
+print("Mengunggah file Parquet baru ke Drive...")
+file_metadata = {
+    'name': OUTPUT_PARQUET,
+    'parents': [TARGET_GDRIVE_FOLDER_ID]
+}
+
+# Upload file baru
+uploaded_file = service.files().create(
+    body=file_metadata, 
+    media_body=media, 
+    fields='id'
+).execute()
+
+print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
