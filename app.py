@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import duckdb
 import plotly.express as px
@@ -20,7 +19,6 @@ st.title("🚚 Database Inbound 2026")
 # ID Folder INBOUND di Google Drive
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 OUTPUT_PARQUET_NAME = "data_inbound_2026.parquet"
-SERVICE_ACCOUNT_FILE = "credentials.json"
 LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
 
 
@@ -35,9 +33,18 @@ def get_drive_service():
     creds_dict = dict(st.secrets["gcp_service_account"])
 
   if creds_dict and "private_key" in creds_dict:
-    # Normalkan private key secara otomatis (ubah string \n literal jadi newline asli & bersihkan spasi)
     pk = str(creds_dict["private_key"])
-    pk = pk.replace("\\n", "\n").replace("\\r", "").strip()
+    # Tangani escape string \n literal maupun baris baru asli secara presisi
+    if "\\n" in pk:
+      pk = pk.replace("\\n", "\n")
+    pk = pk.replace("\r", "").strip()
+
+    # Pastikan batas header dan footer PEM valid tanpa karakter ekstra
+    start_idx = pk.find("-----BEGIN PRIVATE KEY-----")
+    end_idx = pk.find("-----END PRIVATE KEY-----")
+    if start_idx != -1 and end_idx != -1:
+      pk = pk[start_idx : end_idx + len("-----END PRIVATE KEY-----")]
+
     creds_dict["private_key"] = pk
 
   if creds_dict:
