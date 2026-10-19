@@ -17,7 +17,7 @@ st.set_page_config(
 
 st.title("🚚 Database Inbound 2026")
 
-# ID Folder GDrive Utama & Folder Pendukung
+# ID Folder GDrive Utama (Parquet) & Folder Pendukung (Syscode & User ID)
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 SUPPORTING_GDRIVE_FOLDER_ID = "1EsUiz1Egqzlbk0gpaohr7lZBcR5rqB2Y"
 
@@ -66,21 +66,24 @@ def get_drive_service():
 
 
 def download_file_from_drive(service, folder_id, file_name, local_path):
-  query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
-  results = service.files().list(q=query, fields="files(id, name)").execute()
-  items = results.get("files", [])
-  if not items:
+  try:
+    query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get("files", [])
+    if not items:
+      return False
+    file_id = items[0]["id"]
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+      status, done = downloader.next_chunk()
+    with open(local_path, "wb") as f:
+      f.write(fh.getvalue())
+    return True
+  except Exception:
     return False
-  file_id = items[0]["id"]
-  request = service.files().get_media(fileId=file_id)
-  fh = io.BytesIO()
-  downloader = MediaIoBaseDownload(fh, request)
-  done = False
-  while not done:
-    status, done = downloader.next_chunk()
-  with open(local_path, "wb") as f:
-    f.write(fh.getvalue())
-  return True
 
 
 @st.cache_resource
@@ -383,7 +386,7 @@ try:
   st.markdown("---")
 
   # =========================================================
-  # 🗂️ TABEL PIVOT BERJENJANG (UNRUNSHEET BY LAST LOCATION)
+  # 🗂️ TABEL PIVOT BERJENJANG (FAIL-SAFE UNRUNSHEET BY LAST LOCATION)
   # =========================================================
   st.subheader(
       "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang ➔"
@@ -430,15 +433,16 @@ try:
         with_location AS (
             SELECT 
                 c.*,
+                -- MAPPING LOKASI AMAN (FAIL-SAFE)
                 CASE 
                     WHEN valid_inbound_date IS NULL THEN NULL
-                    WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
-                    WHEN valid_inbound_date = dt_hvo THEN HVO_HUB_NAME
-                    WHEN valid_inbound_date = dt_hvi THEN HVO_HUB_DESTINATION_NAME
-                    WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
-                    WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
-                    WHEN valid_inbound_date = dt_tm  THEN TRANSIT_LOCATION
-                    ELSE NULL
+                    WHEN valid_inbound_date = dt_im  THEN COALESCE(TRY_CAST(c.INBOUND_MANIFEST AS VARCHAR), TRY_CAST(c.DEST AS VARCHAR), '-')
+                    WHEN valid_inbound_date = dt_hvo THEN COALESCE(TRY_CAST(c.HVO_NO AS VARCHAR), TRY_CAST(c.DEST AS VARCHAR), '-')
+                    WHEN valid_inbound_date = dt_hvi THEN COALESCE(TRY_CAST(c.HVI_NO AS VARCHAR), TRY_CAST(c.DEST AS VARCHAR), '-')
+                    WHEN valid_inbound_date = dt_mti THEN COALESCE(TRY_CAST(c.MANIFEST_INBOUND_SUBAGEN_NO AS VARCHAR), TRY_CAST(c.DEST AS VARCHAR), '-')
+                    WHEN valid_inbound_date = dt_mts THEN COALESCE(TRY_CAST(c.MANIFEST_TRANSIT_SUBAGEN_NO AS VARCHAR), TRY_CAST(c.DEST AS VARCHAR), '-')
+                    WHEN valid_inbound_date = dt_tm  THEN COALESCE(TRY_CAST(c.TRANSIT_MANIFEST AS VARCHAR), TRY_CAST(c.DEST AS VARCHAR), '-')
+                    ELSE '-'
                 END AS LAST_LOCATION,
                 DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP) AS age_days
             FROM calculated c
@@ -479,8 +483,6 @@ try:
         "H+7",
         ">H+7",
     ]
-
-    # Buat pilihan expand per Last Location agar mirip klik (+) di Excel
     unique_locations = sorted(df_pivot_raw["LAST_LOCATION"].dropna().unique())
 
     col_opt1, col_opt2 = st.columns([2, 2])
@@ -497,7 +499,6 @@ try:
           df_pivot_raw["LAST_LOCATION"] == chosen_loc
       ]
 
-    # Generate Pivot Table Pandas
     df_pivot = pd.pivot_table(
         filtered_pivot_df,
         index=["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"],
@@ -514,7 +515,6 @@ try:
 
     st.dataframe(df_pivot, use_container_width=True)
 
-    # Opsi Expand/Collapse per Wilayah (Mirip Accordion Excel)
     with st.expander(
         "📂 Buka Mode Rinci (Expand / Collapse per Last Location)"
     ):
@@ -545,11 +545,13 @@ try:
 
   aging_where_clause = ""
   if selected_aging_group != "Semua Aging":
-    aging_where_clause = f"AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = {selected_aging_group.replace('H+', '')}"
     if selected_aging_group == ">H+7":
       aging_where_clause = (
           "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) > 7"
       )
+    else:
+      days_val = selected_aging_group.replace("H+", "")
+      aging_where_clause = f"AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = {days_val}"
 
   unrunsheet_detail_query = f"""
         WITH filtered_raw AS (
