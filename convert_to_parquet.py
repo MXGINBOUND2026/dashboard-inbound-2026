@@ -20,7 +20,7 @@ SERVICE_ACCOUNT_FILE = "credentials.json"
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-  # 1. Cek apakah kredensial disediakan melalui Environment Variable (untuk GitHub Actions)
+  # 1. Cek apakah kredensial disediakan melalui Environment Variable GitHub Actions
   gcp_secret_raw = os.environ.get("GCP_SERVICE_ACCOUNT")
 
   if gcp_secret_raw:
