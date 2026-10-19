@@ -31,28 +31,22 @@ def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
   creds_dict = None
 
-  # 1. Coba baca dari file fisik credentials.json terlebih dahulu (jika ada di direktori)
-  if os.path.exists(SERVICE_ACCOUNT_FILE):
-    with open(SERVICE_ACCOUNT_FILE, "r") as f:
-      creds_dict = json.load(f)
-  # 2. Jika tidak ada, gunakan st.secrets sebagai fallback
-  elif hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+  if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
     creds_dict = dict(st.secrets["gcp_service_account"])
 
-  if creds_dict:
-    # Membersihkan karakter \n literal agar terbaca sebagai baris baru (newline) yang sah oleh cryptography
-    if "private_key" in creds_dict:
-      creds_dict["private_key"] = creds_dict["private_key"].replace(
-          "\\n", "\n"
-      )
+  if creds_dict and "private_key" in creds_dict:
+    # Normalkan private key secara otomatis (ubah string \n literal jadi newline asli & bersihkan spasi)
+    pk = str(creds_dict["private_key"])
+    pk = pk.replace("\\n", "\n").replace("\\r", "").strip()
+    creds_dict["private_key"] = pk
 
+  if creds_dict:
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
   else:
     raise FileNotFoundError(
-        f"File '{SERVICE_ACCOUNT_FILE}' tidak ditemukan dan 'gcp_service_account'"
-        " tidak ada di st.secrets!"
+        "Konfigurasi 'gcp_service_account' tidak ditemukan di st.secrets!"
     )
 
   return build("drive", "v3", credentials=creds)
