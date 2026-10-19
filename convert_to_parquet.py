@@ -20,23 +20,13 @@ SERVICE_ACCOUNT_FILE = "credentials.json"
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-  # 1. Cek apakah kredensial disediakan melalui Environment Variable GitHub Actions
-  gcp_secret_raw = os.environ.get("GCP_SERVICE_ACCOUNT")
-
-  if gcp_secret_raw:
-    try:
-      creds_dict = json.loads(gcp_secret_raw)
-    except Exception as e:
-      raise ValueError(f"Gagal memparsing JSON dari GCP_SERVICE_ACCOUNT: {e}")
-  # 2. Fallback menggunakan file fisik lokal (jika ada)
-  elif os.path.exists(SERVICE_ACCOUNT_FILE):
-    with open(SERVICE_ACCOUNT_FILE, "r") as f:
-      creds_dict = json.load(f)
-  else:
+  if not os.path.exists(SERVICE_ACCOUNT_FILE):
     raise FileNotFoundError(
-        "Kredensial Google Cloud tidak ditemukan (Environment Variable"
-        " 'GCP_SERVICE_ACCOUNT' atau file 'credentials.json' tidak ada)."
+        f"File '{SERVICE_ACCOUNT_FILE}' tidak ditemukan di direktori!"
     )
+
+  with open(SERVICE_ACCOUNT_FILE, "r") as f:
+    creds_dict = json.load(f)
 
   # Penanganan mutlak format private_key agar tidak terkena Invalid JWT Signature
   if "private_key" in creds_dict:
