@@ -29,30 +29,26 @@ LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-  # Cek apakah berjalan di Streamlit Cloud menggunakan Secrets
-  if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+  # 1. Prioritaskan membaca file fisik credentials.json yang ada di direktori
+  if os.path.exists(SERVICE_ACCOUNT_FILE):
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
+  # 2. Jika file fisik tidak ada, baru gunakan st.secrets
+  elif hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
     creds_dict = dict(st.secrets["gcp_service_account"])
-
-    # FITUR PENYELESAI ERROR PEM: Konversi \n literal menjadi karakter newline yang sah
     if "private_key" in creds_dict:
       creds_dict["private_key"] = creds_dict["private_key"].replace(
           "\\n", "\n"
       )
-
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
   else:
-    # Jika berjalan di lokal (VS Code) menggunakan file fisik credentials.json
-    if os.path.exists(SERVICE_ACCOUNT_FILE):
-      creds = service_account.Credentials.from_service_account_file(
-          SERVICE_ACCOUNT_FILE, scopes=SCOPES
-      )
-    else:
-      raise FileNotFoundError(
-          f"File '{SERVICE_ACCOUNT_FILE}' tidak ditemukan di lokal dan"
-          " 'gcp_service_account' tidak ada di st.secrets!"
-      )
+    raise FileNotFoundError(
+        f"File '{SERVICE_ACCOUNT_FILE}' tidak ditemukan dan"
+        " 'gcp_service_account' tidak ada di st.secrets!"
+    )
 
   return build("drive", "v3", credentials=creds)
 
