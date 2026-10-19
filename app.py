@@ -119,10 +119,10 @@ conn = duckdb.connect()
 st.success("⚡ File Parquet dimuat secara instan menggunakan DuckDB!")
 
 try:
-  # --- QUERY DUCKDB UNTUK METRIK UTAMA DENGAN LOGIKA REVISI ---
+  # --- QUERY DUCKDB UNTUK METRIK UTAMA DENGAN LOGIKA UNRUNSHEET BARU ---
   metrics_query = f"""
         WITH filtered_raw AS (
-            -- Aturan 4: Exclude AWB CANCEL
+            -- Exclude AWB CANCEL
             SELECT *
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             WHERE AWB_CANCEL IS NULL 
@@ -136,15 +136,16 @@ try:
                 SERVICE,
                 INBOUND_MANIFEST,
                 HVI_NO,
+                CONNOTE_RETURN_RT,
+                CONNOTE_RETURN_RF,
+                WUS_REMARKS,
                 
-                -- LOGIKA VALIDasi INBOUND (Aturan 1, 2, 3)
+                -- LOGIKA VALIDATION INBOUND
                 CASE 
-                    -- Jika INBOUND_MANIFEST ada isinya & berawalan MXG% -> VALID INBOUND
                     WHEN INBOUND_MANIFEST IS NOT NULL 
                          AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' 
                          AND UPPER(INBOUND_MANIFEST) LIKE 'MXG%' THEN 'VALID'
                     
-                    -- Jika SERVICE mengandung CTC dan HVI_NO ada isinya & berawalan MXG% -> VALID INBOUND
                     WHEN UPPER(SERVICE) LIKE '%CTC%' 
                          AND HVI_NO IS NOT NULL 
                          AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' 
@@ -153,39 +154,31 @@ try:
                     ELSE 'UNINBOUND'
                 END AS status_inbound_flag,
                 
-                -- PENENTUAN TANGGAL MAX INBOUND UNTUK AGING
-                GREATEST(
-                    CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END,
-                    CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(HVI_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END,
-                    CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END
-                ) AS valid_inbound_date
+                -- LOGIKA UNRUNSHEET REVISI
+                CASE 
+                    -- Jika CONNOTE_RETURN_RT atau CONNOTE_RETURN_RF ADA ISINYA -> BUKAN UnRunsheet
+                    WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+                      OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+                    THEN 'RUNSHEETED_OR_RETURN'
+                    
+                    -- Jika RUNSHEET_NO KOSONG dan WUS_REMARKS mengandung HOC -> Unrunsheet AU
+                    WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
+                         AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
+                    THEN 'UNRUNSHEET_AU'
+                    
+                    -- Jika RUNSHEET_NO KOSONG -> UnRunsheet Biasa
+                    WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-'
+                    THEN 'UNRUNSHEET'
+                    
+                    ELSE 'RUNSHEETED_OR_RETURN'
+                END AS status_runsheet_flag
             FROM filtered_raw
         )
         SELECT 
             COUNT(DISTINCT AWB) AS total_awb,
             COUNT(CASE WHEN status_inbound_flag = 'UNINBOUND' THEN 1 END) AS total_uninbound,
-            COUNT(CASE WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-' THEN 1 END) AS total_unrunsheet
+            COUNT(CASE WHEN status_runsheet_flag IN ('UNRUNSHEET', 'UNRUNSHEET_AU') THEN 1 END) AS total_unrunsheet,
+            COUNT(CASE WHEN status_runsheet_flag = 'UNRUNSHEET_AU' THEN 1 END) AS total_unrunsheet_au
         FROM processed_data
     """
 
@@ -194,16 +187,18 @@ try:
   total_awb = metrics_df["total_awb"][0] or 0
   total_uninbound = metrics_df["total_uninbound"][0] or 0
   total_unrunsheet = metrics_df["total_unrunsheet"][0] or 0
+  total_unrunsheet_au = metrics_df["total_unrunsheet_au"][0] or 0
 
   # --- TAMPILAN KARTU METRIK (KPI) ---
-  c1, c2, c3 = st.columns(3)
-  c1.metric("📦 Total Unique AWB (Gabungan)", f"{total_awb:,}")
+  c1, c2, c3, c4 = st.columns(4)
+  c1.metric("📦 Total Unique AWB", f"{total_awb:,}")
   c2.metric("⚠️ Total UnInbound", f"{total_uninbound:,}")
   c3.metric(
       "🚨 Alert: Total UnRunsheet",
       f"{total_unrunsheet:,}",
       delta_color="inverse",
   )
+  c4.metric("🚚 Unrunsheet AU (HOC)", f"{total_unrunsheet_au:,}")
 
   st.markdown("---")
 
@@ -225,7 +220,9 @@ try:
             SELECT 
                 AWB,
                 RUNSHEET_NO,
-                SERVICE,
+                CONNOTE_RETURN_RT,
+                CONNOTE_RETURN_RF,
+                WUS_REMARKS,
                 GREATEST(
                     CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                         COALESCE(
@@ -253,6 +250,10 @@ try:
                     ELSE NULL END
                 ) AS valid_inbound_date
             FROM filtered_raw
+            WHERE NOT (
+                (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+                OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+            )
         ),
         unrunsheet_aging AS (
             SELECT 
@@ -410,6 +411,9 @@ try:
                 AWB,
                 SERVICE,
                 RUNSHEET_NO,
+                WUS_REMARKS,
+                CONNOTE_RETURN_RT,
+                CONNOTE_RETURN_RF,
                 GREATEST(
                     CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                         COALESCE(
@@ -437,12 +441,21 @@ try:
                     ELSE NULL END
                 ) AS tanggal_max_inbound
             FROM filtered_raw
+            WHERE NOT (
+                (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+                OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+            )
         )
         SELECT 
             AWB,
             tanggal_max_inbound AS Tanggal_Max_Inbound,
             CAST(DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) AS VARCHAR) || ' Hari' AS Aging,
-            SERVICE
+            SERVICE,
+            CASE 
+                WHEN UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%' THEN '🚨 Unrunsheet AU'
+                ELSE 'Unrunsheet Biasa'
+            END AS Kategori_Unrunsheet,
+            WUS_REMARKS
         FROM processed_data
         WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
           AND tanggal_max_inbound IS NOT NULL
@@ -489,32 +502,9 @@ try:
             HVI_DATE,
             MANIFEST_INBOUND_SUBAGEN_NO,
             MANIFEST_INBOUND_SUBAGEN_DATE,
-            GREATEST(
-                CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
-                    COALESCE(
-                        TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
-                        TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
-                        TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
-                        TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
-                    )
-                ELSE NULL END,
-                CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
-                    COALESCE(
-                        TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
-                        TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
-                        TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
-                        TRY_CAST(HVI_DATE AS TIMESTAMP)
-                    )
-                ELSE NULL END,
-                CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
-                    COALESCE(
-                        TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
-                        TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
-                        TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
-                        TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
-                    )
-                ELSE NULL END
-            ) AS Valid_Inbound_Date,
+            CONNOTE_RETURN_RT,
+            CONNOTE_RETURN_RF,
+            WUS_REMARKS,
             CASE 
                 WHEN (INBOUND_MANIFEST IS NOT NULL AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' AND UPPER(INBOUND_MANIFEST) LIKE 'MXG%')
                      OR (UPPER(SERVICE) LIKE '%CTC%' AND HVI_NO IS NOT NULL AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' AND UPPER(HVI_NO) LIKE 'MXG%')
@@ -523,7 +513,17 @@ try:
             END AS Status_Inbound,
             COALESCE(RUNSHEET_NO, '-') AS RUNSHEET_NO,
             CASE 
-                WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-' THEN '🚨 UnRunsheet'
+                WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+                  OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+                THEN 'Return'
+                
+                WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
+                     AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
+                THEN '🚨 Unrunsheet AU'
+                
+                WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-' 
+                THEN '🚨 UnRunsheet'
+                
                 ELSE 'Runsheeted'
             END AS Status_Runsheet
         FROM filtered_raw
