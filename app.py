@@ -386,7 +386,7 @@ try:
   st.markdown("---")
 
   # =========================================================
-  # 🗂️ TABEL PIVOT BERJENJANG DENGAN REVISI LAST_LOCATION
+  # 🗂️ TABEL PIVOT BERJENJANG DENGAN FILTER CABANG & ZONA
   # =========================================================
   st.subheader(
       "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang ➔"
@@ -464,6 +464,10 @@ try:
             WHERE valid_inbound_date IS NOT NULL
         )
         SELECT 
+            COALESCE(w.AWB, '-') AS AWB,
+            COALESCE(w.SERVICE, '-') AS SERVICE,
+            COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
+            w.valid_inbound_date AS tanggal_max_inbound,
             COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
             COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
             COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
@@ -478,8 +482,7 @@ try:
                 WHEN age_days = 6 THEN 'H+6'
                 WHEN age_days = 7 THEN 'H+7'
                 ELSE '>H+7'
-            END AS aging_group,
-            w.AWB
+            END AS aging_group
         FROM with_last_location w
         LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
     """
@@ -487,6 +490,41 @@ try:
   df_pivot_raw = conn.execute(pivot_query).fetchdf()
 
   if not df_pivot_raw.empty:
+    # --- WIDGET FILTER INTERAKTIF (Last Location, Cabang, Zona) ---
+    unique_locations = sorted(df_pivot_raw["LAST_LOCATION"].dropna().unique())
+    unique_cabang = sorted(df_pivot_raw["Cabang"].dropna().unique())
+    unique_zona = sorted(df_pivot_raw["Zona"].dropna().unique())
+
+    f_col1, f_col2, f_col3 = st.columns(3)
+    with f_col1:
+      chosen_loc = st.selectbox(
+          "🔍 Filter Last Location:",
+          ["Semua Last Location"] + list(unique_locations),
+      )
+    with f_col2:
+      chosen_cabang = st.selectbox(
+          "🏢 Filter Cabang:", ["Semua Cabang"] + list(unique_cabang)
+      )
+    with f_col3:
+      chosen_zona = st.selectbox(
+          "⚡ Filter Zona (QCE):", ["Semua Zona"] + list(unique_zona)
+      )
+
+    # Terapkan filter ke dataframe pivot
+    filtered_pivot_df = df_pivot_raw.copy()
+    if chosen_loc != "Semua Last Location":
+      filtered_pivot_df = filtered_pivot_df[
+          filtered_pivot_df["LAST_LOCATION"] == chosen_loc
+      ]
+    if chosen_cabang != "Semua Cabang":
+      filtered_pivot_df = filtered_pivot_df[
+          filtered_pivot_df["Cabang"] == chosen_cabang
+      ]
+    if chosen_zona != "Semua Zona":
+      filtered_pivot_df = filtered_pivot_df[
+          filtered_pivot_df["Zona"] == chosen_zona
+      ]
+
     expected_cols = [
         "H+0",
         "H+1",
@@ -498,21 +536,6 @@ try:
         "H+7",
         ">H+7",
     ]
-    unique_locations = sorted(df_pivot_raw["LAST_LOCATION"].dropna().unique())
-
-    col_opt1, col_opt2 = st.columns([2, 2])
-    with col_opt1:
-      chosen_loc = st.selectbox(
-          "🔍 Pilih / Filter Last Location:",
-          ["Semua Last Location"] + list(unique_locations),
-      )
-
-    if chosen_loc == "Semua Last Location":
-      filtered_pivot_df = df_pivot_raw
-    else:
-      filtered_pivot_df = df_pivot_raw[
-          df_pivot_raw["LAST_LOCATION"] == chosen_loc
-      ]
 
     df_pivot = pd.pivot_table(
         filtered_pivot_df,
@@ -535,103 +558,92 @@ try:
     ):
       for loc in unique_locations:
         with st.expander(f"📍 {loc}"):
-          sub_df = df_pivot_raw[df_pivot_raw["LAST_LOCATION"] == loc]
-          sub_pivot = pd.pivot_table(
-              sub_df,
-              index=["Cabang", "Zona", "Kecamatan"],
-              columns="aging_group",
-              values="AWB",
-              aggfunc="count",
-              fill_value=0,
-          )
-          sub_cols = [c for c in expected_cols if c in sub_pivot.columns]
-          sub_pivot = sub_pivot[sub_cols]
-          sub_pivot["Grand Total"] = sub_pivot.sum(axis=1)
-          st.dataframe(sub_pivot, use_container_width=True)
+          sub_df = filtered_pivot_df[filtered_pivot_df["LAST_LOCATION"] == loc]
+          if not sub_df.empty:
+            sub_pivot = pd.pivot_table(
+                sub_df,
+                index=["Cabang", "Zona", "Kecamatan"],
+                columns="aging_group",
+                values="AWB",
+                aggfunc="count",
+                fill_value=0,
+            )
+            sub_cols = [c for c in expected_cols if c in sub_pivot.columns]
+            sub_pivot = sub_pivot[sub_cols]
+            sub_pivot["Grand Total"] = sub_pivot.sum(axis=1)
+            st.dataframe(sub_pivot, use_container_width=True)
+          else:
+            st.info("Tidak ada data untuk filter ini.")
   else:
     st.info("Tidak ada data untuk tabel pivot UnRunsheet.")
 
   st.markdown("---")
 
   # =========================================================
-  # 📋 TABEL DETAIL AWB UNRUNSHEET (DENGAN FILTER & DOWNLOAD)
+  # 📋 TABEL DETAIL AWB UNRUNSHEET (MENGIKUTI FILTER DI ATAS)
   # =========================================================
-  st.subheader(f"📋 Detail AWB UnRunsheet — Kategori: [{selected_aging_group}]")
+  st.subheader(
+      f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
+  )
 
-  aging_where_clause = ""
+  # Filter dataframe detail agar ikut tersaring berdasarkan pilihan Last Location, Cabang, Zona, dan Aging
+  df_detail_filtered = df_pivot_raw.copy()
+
   if selected_aging_group != "Semua Aging":
-    if selected_aging_group == ">H+7":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) > 7"
+    df_detail_filtered = df_detail_filtered[
+        df_detail_filtered["aging_group"] == selected_aging_group
+    ]
+  if chosen_loc != "Semua Last Location":
+    df_detail_filtered = df_detail_filtered[
+        df_detail_filtered["LAST_LOCATION"] == chosen_loc
+    ]
+  if chosen_cabang != "Semua Cabang":
+    df_detail_filtered = df_detail_filtered[
+        df_detail_filtered["Cabang"] == chosen_cabang
+    ]
+  if chosen_zona != "Semua Zona":
+    df_detail_filtered = df_detail_filtered[
+        df_detail_filtered["Zona"] == chosen_zona
+    ]
+
+  # Format kolom untuk ditampilkan di tabel detail
+  df_display_detail = df_detail_filtered[
+      ["AWB", "tanggal_max_inbound", "aging_group", "SERVICE", "WUS_REMARKS"]
+  ].copy()
+  df_display_detail["Aging"] = (
+      df_display_detail["aging_group"].astype(str) + " (Grup)"
+  )
+  df_display_detail["Kategori_Unrunsheet"] = df_display_detail[
+      "WUS_REMARKS"
+  ].apply(
+      lambda x: (
+          "🚨 Unrunsheet AU"
+          if pd.notnull(x) and "HOC" in str(x).upper()
+          else "Unrunsheet Biasa"
       )
-    else:
-      days_val = selected_aging_group.replace("H+", "")
-      aging_where_clause = f"AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = {days_val}"
+  )
 
-  unrunsheet_detail_query = f"""
-        WITH filtered_raw AS (
-            SELECT *
-            FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            WHERE AWB_CANCEL IS NULL 
-               OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' 
-               OR AWB_CANCEL = '-'
-        ),
-        parsed_dates AS (
-            SELECT 
-                *,
-                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
-                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
-                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
-                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
-                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
-                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
-            FROM filtered_raw
-            WHERE NOT (
-                (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-                OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-            )
-        ),
-        processed_data AS (
-            SELECT 
-                AWB,
-                SERVICE,
-                RUNSHEET_NO,
-                WUS_REMARKS,
-                GREATEST(
-                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
-                    CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
-                    CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
-                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
-                    CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
-                    CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
-                ) AS tanggal_max_inbound
-            FROM parsed_dates
-        )
-        SELECT 
-            AWB,
-            tanggal_max_inbound AS Tanggal_Max_Inbound,
-            CAST(DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) AS VARCHAR) || ' Hari' AS Aging,
-            SERVICE,
-            CASE 
-                WHEN UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%' THEN '🚨 Unrunsheet AU'
-                ELSE 'Unrunsheet Biasa'
-            END AS Kategori_Unrunsheet,
-            WUS_REMARKS
-        FROM processed_data
-        WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
-          AND tanggal_max_inbound IS NOT NULL
-        {aging_where_clause}
-        ORDER BY tanggal_max_inbound ASC
-    """
+  df_final_detail = df_display_detail[
+      [
+          "AWB",
+          "tanggal_max_inbound",
+          "Aging",
+          "SERVICE",
+          "Kategori_Unrunsheet",
+          "WUS_REMARKS",
+      ]
+  ].rename(columns={"tanggal_max_inbound": "Tanggal_Max_Inbound"})
 
-  df_unrunsheet_detail = conn.execute(unrunsheet_detail_query).fetchdf()
-  st.dataframe(df_unrunsheet_detail, use_container_width=True)
+  st.dataframe(df_final_detail, use_container_width=True)
 
-  csv_data = df_unrunsheet_detail.to_csv(index=False).encode("utf-8")
+  csv_data = df_final_detail.to_csv(index=False).encode("utf-8")
   st.download_button(
-      label=f"📥 Download Data CSV UnRunsheet [{selected_aging_group}]",
+      label=(
+          f"📥 Download Data CSV UnRunsheet [{selected_aging_group} |"
+          f" Cabang: {chosen_cabang} | Zona: {chosen_zona}]"
+      ),
       data=csv_data,
-      file_name=f"UnRunsheet_{selected_aging_group.replace(' ', '_')}.csv",
+      file_name=f"UnRunsheet_{selected_aging_group.replace(' ', '_')}_Cabang_{chosen_cabang}.csv",
       mime="text/csv",
   )
 
