@@ -9,8 +9,6 @@ from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 # =========================================================
 # KONFIGURASI
 # =========================================================
-# Ganti dengan FOLDER_ID Google Drive Anda (bagian terakhir dari URL folder GDrive)
-# Contoh URL: https://drive.google.com/drive/folders/1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 
 TEMP_CSV_DIR = "temp_csv_files"
@@ -42,13 +40,16 @@ def download_gdrive_folder(service, folder_id, local_path):
             file_id = item['id']
             file_name = item['name']
             mime_type = item['mimeType']
+            
+            # PENTING: Jangan unduh file parquet output kita sendiri!
+            if file_name == OUTPUT_PARQUET:
+                continue
+                
             local_item_path = os.path.join(local_path, file_name)
             
             if mime_type == 'application/vnd.google-apps.folder':
-                # Jika berupa subfolder, lakukan rekursif ke dalam
                 download_gdrive_folder(service, file_id, local_item_path)
             else:
-                # Download file CSV
                 print(f"Mengunduh file: {file_name}")
                 request = service.files().get_media(fileId=file_id)
                 fh = io.BytesIO()
@@ -73,16 +74,20 @@ service = get_drive_service()
 if os.path.exists(TEMP_CSV_DIR):
     shutil.rmtree(TEMP_CSV_DIR)
 
-print("2. Mengunduh seluruh file CSV dari folder Google Drive...")
+print("2. Mengunduh seluruh file CSV dari Google Drive...")
 download_gdrive_folder(service, TARGET_GDRIVE_FOLDER_ID, TEMP_CSV_DIR)
 
-print("\n3. Mengonversi seluruh file CSV ke format Parquet via DuckDB...")
+print("\n3. Mengonversi CSV ke Parquet dengan Optimasi Memori DuckDB...")
 con = duckdb.connect()
+
+# Batasi memori DuckDB agar aman di server GitHub Actions (maks 3GB)
+con.execute("PRAGMA memory_limit='3GB';")
+
 csv_pattern = os.path.join(TEMP_CSV_DIR, "**", "*.csv")
 
 con.execute(f"""
     COPY (
-        SELECT * FROM read_csv_auto('{csv_pattern}', ignore_errors=true)
+        SELECT * FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true)
     ) TO '{OUTPUT_PARQUET}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
 """)
 
@@ -98,7 +103,6 @@ print("Folder CSV sementara di lokal telah dibersihkan.")
 print("\n4. Mengunggah file Parquet ke Google Drive...")
 media = MediaFileUpload(OUTPUT_PARQUET, resumable=True)
 
-# Cek apakah file parquet sudah ada di folder tujuan
 query = f"'{TARGET_GDRIVE_FOLDER_ID}' in parents and name = '{OUTPUT_PARQUET}' and trashed = false"
 results = service.files().list(q=query, fields="files(id, name)").execute()
 items = results.get('files', [])
