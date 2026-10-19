@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import os
@@ -14,19 +15,24 @@ TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 
 TEMP_CSV_DIR = "temp_csv_files"
 OUTPUT_PARQUET = "data_inbound_2026.parquet"
-SERVICE_ACCOUNT_FILE = "credentials.json"
 
 
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-  if not os.path.exists(SERVICE_ACCOUNT_FILE):
-    raise FileNotFoundError(
-        f"File '{SERVICE_ACCOUNT_FILE}' tidak ditemukan di direktori!"
-    )
+  # Membaca string Base64 langsung dari GitHub Actions Environment Variable
+  b64_secret = os.environ.get("GDRIVE_CREDENTIALS_B64")
 
-  with open(SERVICE_ACCOUNT_FILE, "r") as f:
-    creds_dict = json.load(f)
+  if b64_secret:
+    try:
+      json_bytes = base64.b64decode(b64_secret)
+      creds_dict = json.loads(json_bytes.decode("utf-8"))
+    except Exception as e:
+      raise ValueError(f"Gagal mendecode Base64 GDRIVE_CREDENTIALS_B64: {e}")
+  else:
+    raise FileNotFoundError(
+        "Environment Variable 'GDRIVE_CREDENTIALS_B64' tidak ditemukan!"
+    )
 
   # Penanganan mutlak format private_key agar tidak terkena Invalid JWT Signature
   if "private_key" in creds_dict:
