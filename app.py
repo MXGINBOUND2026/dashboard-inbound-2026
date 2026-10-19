@@ -28,18 +28,27 @@ LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
 # =========================================================
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
-  # Cek apakah berjalan di Streamlit Cloud dengan secrets
-  if "gcp_service_account" in st.secrets:
+
+  # Cek apakah berjalan di Streamlit Cloud menggunakan Secrets
+  if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
   else:
-    # Jika berjalan di lokal (VS Code) menggunakan file fisik
-    creds = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=SCOPES
-    )
+    # Jika berjalan di lokal (VS Code) menggunakan file fisik credentials.json
+    if os.path.exists(SERVICE_ACCOUNT_FILE):
+      creds = service_account.Credentials.from_service_account_file(
+          SERVICE_ACCOUNT_FILE, scopes=SCOPES
+      )
+    else:
+      raise FileNotFoundError(
+          f"File '{SERVICE_ACCOUNT_FILE}' tidak ditemukan di lokal dan"
+          " 'gcp_service_account' tidak ada di st.secrets!"
+      )
+
   return build("drive", "v3", credentials=creds)
+
 
 @st.cache_resource
 def sync_parquet_from_gdrive():
