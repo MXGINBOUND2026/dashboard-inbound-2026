@@ -134,22 +134,25 @@ try:
                         GREATEST(
                             CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END,
                             CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(HVI_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END,
                             CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END
@@ -202,22 +205,25 @@ try:
                         GREATEST(
                             CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END,
                             CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(HVI_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END,
                             CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END
@@ -382,22 +388,25 @@ try:
                         GREATEST(
                             CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END,
                             CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(HVI_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END,
                             CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
                                 COALESCE(
-                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                    TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
+                                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
                                     TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
                                 )
                             ELSE NULL END
@@ -455,22 +464,25 @@ try:
                     GREATEST(
                         CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                             COALESCE(
-                                TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
+                                TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
+                                TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
                                 TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
                             )
                         ELSE NULL END,
                         CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
                             COALESCE(
-                                TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
+                                TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
+                                TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
                                 TRY_CAST(HVI_DATE AS TIMESTAMP)
                             )
                         ELSE NULL END,
                         CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
                             COALESCE(
-                                TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
+                                TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
+                                TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
                                 TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
                             )
                         ELSE NULL END
@@ -484,22 +496,25 @@ try:
                             GREATEST(
                                 CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
                                     COALESCE(
-                                        TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                        TRY_CAST(STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                        TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
+                                        TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
+                                        TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
                                         TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
                                     )
                                 ELSE NULL END,
                                 CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
                                     COALESCE(
-                                        TRY_CAST(STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                        TRY_CAST(STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                        TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
+                                        TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
+                                        TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
                                         TRY_CAST(HVI_DATE AS TIMESTAMP)
                                     )
                                 ELSE NULL END,
                                 CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
                                     COALESCE(
-                                        TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M') AS TIMESTAMP),
-                                        TRY_CAST(STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M') AS TIMESTAMP),
+                                        TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
+                                        TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
+                                        TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
                                         TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
                                     )
                                 ELSE NULL END
