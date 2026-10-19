@@ -20,8 +20,10 @@ jobs:
           pip install --upgrade pip
           pip install gdown duckdb google-api-python-client google-auth-httplib2 google-auth-oauthlib pyarrow
 
+      - name: Generate credentials.json
+        run: |
+          echo '${{ secrets.GDRIVE_CREDENTIALS }}' > credentials.json
+
       - name: Run Convert Script
-        env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GDRIVE_CREDENTIALS }}
         run: |
           python convert_to_parquet.py
