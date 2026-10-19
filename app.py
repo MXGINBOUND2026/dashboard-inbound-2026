@@ -162,7 +162,7 @@ st.success(
     " DuckDB!"
 )
 
-# State untuk kontrol navigasi halaman aktif dari klik card
+# State navigasi untuk mengontrol tampilan aktif dari klik kartu/tombol
 if "active_view" not in st.session_state:
   st.session_state.active_view = "UnRunsheet"
 
@@ -178,6 +178,14 @@ try:
                   OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
               )
         ),
+        parsed_dates AS (
+            SELECT 
+                *,
+                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti
+            FROM filtered_raw
+        ),
         processed_data AS (
             SELECT 
                 AWB,
@@ -186,30 +194,41 @@ try:
                 INBOUND_MANIFEST,
                 HVI_NO,
                 WUS_REMARKS,
+                CONNOTE_RETURN_RT,
+                CONNOTE_RETURN_RF,
                 
-                -- LOGIKA INBOUND / UNINBOUND
-                CASE 
-                    WHEN INBOUND_MANIFEST IS NOT NULL AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' AND UPPER(INBOUND_MANIFEST) LIKE '%MXG%' THEN 'VALID'
-                    WHEN UPPER(SERVICE) LIKE '%CTC%' AND HVI_NO IS NOT NULL AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' AND UPPER(HVI_NO) LIKE '%MXG%' THEN 'VALID'
-                    ELSE 'UNINBOUND'
-                END AS status_inbound_flag,
+                -- LOGIKA LAST INBOUND (MAX INBOUND DATE)
+                GREATEST(
+                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                    CASE WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END
+                ) AS last_inbound_date,
                 
                 -- LOGIKA UNRUNSHEET
                 CASE 
-                    WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
+                    WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
                          AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
                     THEN 'UNRUNSHEET_AU'
                     
-                    WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-'
+                    WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-'
                     THEN 'UNRUNSHEET'
                     
                     ELSE 'RUNSHEETED'
                 END AS status_runsheet_flag
-            FROM filtered_raw
+            FROM parsed_dates
         )
         SELECT 
             COUNT(DISTINCT AWB) AS total_awb,
-            COUNT(CASE WHEN status_inbound_flag = 'UNINBOUND' THEN 1 END) AS total_uninbound,
+            -- UNINBOUND: JIKA LAST INBOUND KOSONG, TIDAK ADA RUNSHEET MXG, DAN TIDAK ADA RETURN RT/RF
+            COUNT(
+                CASE 
+                    WHEN last_inbound_date IS NULL 
+                         AND (RUNSHEET_NO IS NULL OR UPPER(RUNSHEET_NO) NOT LIKE '%MXG%')
+                         AND (CONNOTE_RETURN_RT IS NULL OR TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) = '' OR CONNOTE_RETURN_RT = '-')
+                         AND (CONNOTE_RETURN_RF IS NULL OR TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) = '' OR CONNOTE_RETURN_RF = '-')
+                    THEN 1 
+                END
+            ) AS total_uninbound,
             COUNT(CASE WHEN status_runsheet_flag IN ('UNRUNSHEET', 'UNRUNSHEET_AU') THEN 1 END) AS total_unrunsheet,
             COUNT(CASE WHEN status_runsheet_flag = 'UNRUNSHEET_AU' THEN 1 END) AS total_unrunsheet_au
         FROM processed_data
@@ -222,34 +241,41 @@ try:
   total_unrunsheet = metrics_df["total_unrunsheet"][0] or 0
   total_unrunsheet_au = metrics_df["total_unrunsheet_au"][0] or 0
 
-  # --- KARTU METRIK INTERAKTIF (BISA DIKLIK UNTUK PINDAH KE TABEL) ---
+  # --- TAMPILAN KARTU METRIK DENGAN STYLING RAPI ---
   c1, c2, c3, c4 = st.columns(4)
-  c1.metric("📦 Total Unique AWB", f"{total_awb:,}")
 
-  if c2.button(
-      f"⚠️ Total UnInbound\n\n### {total_uninbound:,}",
-      use_container_width=True,
-  ):
-    st.session_state.active_view = "UnInbound"
-    st.rerun()
+  with c1:
+    st.metric(label="📦 Total Unique AWB", value=f"{total_awb:,}")
 
-  if c3.button(
-      f"🚨 Alert: Total UnRunsheet\n\n### {total_unrunsheet:,}",
-      use_container_width=True,
-  ):
-    st.session_state.active_view = "UnRunsheet"
-    st.rerun()
+  with c2:
+    st.metric(label="⚠️ Total UnInbound", value=f"{total_uninbound:,}")
+    if st.button(
+        "👉 Lihat Data UnInbound", key="btn_uninbound", use_container_width=True
+    ):
+      st.session_state.active_view = "UnInbound"
+      st.rerun()
 
-  if c4.button(
-      f"🚚 Unrunsheet AU (HOC)\n\n### {total_unrunsheet_au:,}",
-      use_container_width=True,
-  ):
-    st.session_state.active_view = "UnRunsheet AU"
-    st.rerun()
+  with c3:
+    st.metric(label="🚨 Alert: Total UnRunsheet", value=f"{total_unrunsheet:,}")
+    if st.button(
+        "👉 Lihat Data UnRunsheet",
+        key="btn_unrunsheet",
+        use_container_width=True,
+    ):
+      st.session_state.active_view = "UnRunsheet"
+      st.rerun()
+
+  with c4:
+    st.metric(label="🚚 Unrunsheet AU (HOC)", value=f"{total_unrunsheet_au:,}")
+    if st.button(
+        "👉 Lihat UnRunsheet AU", key="btn_unrunsheet_au", use_container_width=True
+    ):
+      st.session_state.active_view = "UnRunsheet AU"
+      st.rerun()
 
   st.markdown("---")
 
-  # --- NAVIGASI TAMPILAN DENGAN TOMBOL/TAB ---
+  # --- RADIO BUTTON NAVIGASI UTAMA ---
   view_choice = st.radio(
       "📌 Pilih Tampilan Data Dashboard:",
       ["📊 Analisis UnRunsheet", "⚠️ Tabel UnInbound"],
@@ -258,7 +284,7 @@ try:
   )
 
   # =========================================================
-  # VIEW 1: TAMPILAN ANALISIS UNRUNSHEET
+  # VIEW 1: ANALISIS UNRUNSHEET
   # =========================================================
   if view_choice == "📊 Analisis UnRunsheet":
     st.subheader(
@@ -307,7 +333,7 @@ try:
                     valid_inbound_date,
                     DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP) AS age_days
                 FROM processed_data
-                WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
+                WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
                   AND valid_inbound_date IS NOT NULL
             ),
             grouped_aging AS (
@@ -450,7 +476,7 @@ try:
                         CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
                     ) AS valid_inbound_date
                 FROM joined_locations j
-                WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
+                WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
             ),
             with_last_location AS (
                 SELECT 
@@ -589,10 +615,10 @@ try:
       )
 
   # =========================================================
-  # VIEW 2: TABEL UNINBOUND (PENYESUAIAN ATURAN BARU)
+  # VIEW 2: TABEL UNINBOUND (REVISI LOGIKA UTUH)
   # =========================================================
   else:
-    st.subheader("⚠️ Tabel UnInbound (Dengan Perhitungan Aging Outbound Valid)")
+    st.subheader("⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)")
 
     uninbound_query = f"""
             WITH filtered_raw AS (
@@ -607,28 +633,30 @@ try:
             parsed_data AS (
                 SELECT 
                     f.*,
-                    COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_outbound,
+                    COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
                     COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
-                    
-                    -- LOGIKA UNINBOUND CHECK
-                    CASE 
-                        WHEN INBOUND_MANIFEST IS NOT NULL AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' AND UPPER(INBOUND_MANIFEST) LIKE '%MXG%' THEN 'VALID'
-                        WHEN UPPER(SERVICE) LIKE '%CTC%' AND HVI_NO IS NOT NULL AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' AND UPPER(HVI_NO) LIKE '%MXG%' THEN 'VALID'
-                        ELSE 'UNINBOUND'
-                    END AS status_inbound_flag
+                    COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                    COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+                    COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_outbound
                 FROM filtered_raw f
             ),
-            calculated_aging AS (
+            calculated_inbound AS (
                 SELECT 
                     p.*,
-                    -- LOGIKA PARAMETER TANGGAL AGING UNINBOUND
+                    -- MAX INBOUND DATE (LAST INBOUND)
+                    GREATEST(
+                        CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                        CASE WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                        CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END
+                    ) AS last_inbound_date,
+                    
+                    -- PARAMETER TANGGAL OUTBOUND VALID UNTUK HITUNG AGING UNINBOUND
                     CASE 
                         WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' AND dt_hvo IS NOT NULL 
                         THEN dt_hvo
                         ELSE dt_outbound
                     END AS ref_outbound_date
                 FROM parsed_data p
-                WHERE status_inbound_flag = 'UNINBOUND'
             )
             SELECT 
                 c.AWB,
@@ -638,14 +666,17 @@ try:
                 CAST(DATEDIFF('day', c.ref_outbound_date, CURRENT_TIMESTAMP) AS VARCHAR) || ' Hari' AS Aging,
                 c.SERVICE,
                 c.ref_outbound_date AS Tanggal_Acuan_Outbound
-            FROM calculated_aging c
+            FROM calculated_inbound c
             LEFT JOIN syscode_tbl s ON c.DEST = s.SYSCODE
+            WHERE c.last_inbound_date IS NULL
+              AND (c.RUNSHEET_NO IS NULL OR UPPER(c.RUNSHEET_NO) NOT LIKE '%MXG%')
+              AND (c.CONNOTE_RETURN_RT IS NULL OR TRIM(CAST(c.CONNOTE_RETURN_RT AS VARCHAR)) = '' OR c.CONNOTE_RETURN_RT = '-')
+              AND (c.CONNOTE_RETURN_RF IS NULL OR TRIM(CAST(c.CONNOTE_RETURN_RF AS VARCHAR)) = '' OR c.CONNOTE_RETURN_RF = '-')
             ORDER BY c.ref_outbound_date ASC
         """
 
     df_uninbound = conn.execute(uninbound_query).fetchdf()
 
-    # Filter Wilayah
     if not df_uninbound.empty:
       u_cabang = ["Semua Cabang"] + sorted(
           df_uninbound["Cabang"].dropna().unique()
