@@ -1,6 +1,7 @@
 import io
 import os
 import duckdb
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 from google.oauth2 import service_account
@@ -16,14 +17,21 @@ st.set_page_config(
 
 st.title("🚚 Database Inbound 2026")
 
-# ID Folder INBOUND di Google Drive
+# ID Folder GDrive Utama & Folder Pendukung
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
+SUPPORTING_GDRIVE_FOLDER_ID = "1EsUiz1Egqzlbk0gpaohr7lZBcR5rqB2Y"
+
 OUTPUT_PARQUET_NAME = "data_inbound_2026.parquet"
+SYSCODE_FILE_NAME = "Syscode.xlsx"
+USER_ID_FILE_NAME = "User_Id_MXG.xlsx"
+
 LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
+LOCAL_SYSCODE_PATH = os.path.join(os.getcwd(), SYSCODE_FILE_NAME)
+LOCAL_USER_ID_PATH = os.path.join(os.getcwd(), USER_ID_FILE_NAME)
 
 
 # =========================================================
-# FUNGSI AKSES GOOGLE DRIVE API & SINKRONISASI PARQUET
+# FUNGSI AKSES GOOGLE DRIVE API & SINKRONISASI FILE
 # =========================================================
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -57,41 +65,56 @@ def get_drive_service():
   return build("drive", "v3", credentials=creds)
 
 
+def download_file_from_drive(service, folder_id, file_name, local_path):
+  query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
+  results = service.files().list(q=query, fields="files(id, name)").execute()
+  items = results.get("files", [])
+  if not items:
+    return False
+  file_id = items[0]["id"]
+  request = service.files().get_media(fileId=file_id)
+  fh = io.BytesIO()
+  downloader = MediaIoBaseDownload(fh, request)
+  done = False
+  while not done:
+    status, done = downloader.next_chunk()
+  with open(local_path, "wb") as f:
+    f.write(fh.getvalue())
+  return True
+
+
 @st.cache_resource
-def sync_parquet_from_gdrive():
-  """Mencari file data_inbound_2026.parquet di Drive dan mengunduhnya ke lokal."""
-  with st.spinner("🔄 Mengunduh file Parquet terbaru dari Google Drive..."):
+def sync_all_files_from_gdrive():
+  """Mengunduh file Parquet dan file Excel pendukung dari Google Drive."""
+  with st.spinner("🔄 Mengunduh file database dan data pendukung terbaru..."):
     try:
       service = get_drive_service()
-
-      query = f"'{TARGET_GDRIVE_FOLDER_ID}' in parents and name = '{OUTPUT_PARQUET_NAME}' and trashed = false"
-      results = (
-          service.files().list(q=query, fields="files(id, name)").execute()
+      success_parquet = download_file_from_drive(
+          service,
+          TARGET_GDRIVE_FOLDER_ID,
+          OUTPUT_PARQUET_NAME,
+          LOCAL_PARQUET_PATH,
       )
-      items = results.get("files", [])
-
-      if not items:
+      download_file_from_drive(
+          service,
+          SUPPORTING_GDRIVE_FOLDER_ID,
+          SYSCODE_FILE_NAME,
+          LOCAL_SYSCODE_PATH,
+      )
+      download_file_from_drive(
+          service,
+          SUPPORTING_GDRIVE_FOLDER_ID,
+          USER_ID_FILE_NAME,
+          LOCAL_USER_ID_PATH,
+      )
+      if not success_parquet:
         st.error(
-            f"File '{OUTPUT_PARQUET_NAME}' tidak ditemukan di folder Google"
-            " Drive!"
+            f"File '{OUTPUT_PARQUET_NAME}' tidak ditemukan di Google Drive!"
         )
         return False
-
-      file_id = items[0]["id"]
-
-      request = service.files().get_media(fileId=file_id)
-      fh = io.BytesIO()
-      downloader = MediaIoBaseDownload(fh, request)
-      done = False
-      while not done:
-        status, done = downloader.next_chunk()
-
-      with open(LOCAL_PARQUET_PATH, "wb") as f:
-        f.write(fh.getvalue())
-
       return True
     except Exception as e:
-      st.error(f"Terjadi kesalahan saat mengunduh Parquet dari Drive: {e}")
+      st.error(f"Terjadi kesalahan saat mengunduh file dari Drive: {e}")
       return False
 
 
@@ -101,33 +124,61 @@ def sync_parquet_from_gdrive():
 st.sidebar.header("⚙️ Pengaturan & Sinkronisasi GDrive")
 if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.cache_resource.clear()
-  if os.path.exists(LOCAL_PARQUET_PATH):
-    os.remove(LOCAL_PARQUET_PATH)
-  st.success("Cache dibersihkan! Mengunduh file Parquet terbaru...")
+  for path in [
+      LOCAL_PARQUET_PATH,
+      LOCAL_SYSCODE_PATH,
+      LOCAL_USER_ID_PATH,
+  ]:
+    if os.path.exists(path):
+      os.remove(path)
+  st.success("Cache dibersihkan! Mengunduh file terbaru...")
   st.rerun()
 
 if not os.path.exists(LOCAL_PARQUET_PATH):
-  success = sync_parquet_from_gdrive()
+  success = sync_all_files_from_gdrive()
   if not success:
     st.stop()
 
 # =========================================================
-# KHUSUS DUCKDB & QUERY ANALISIS PARQUET
+# INISIALISASI DUCKDB & REGISTRASI DATA PENDUKUNG EXCEL
 # =========================================================
 conn = duckdb.connect()
 
-st.success("⚡ File Parquet dimuat secara instan menggunakan DuckDB!")
+try:
+  if os.path.exists(LOCAL_SYSCODE_PATH):
+    df_syscode = pd.read_excel(LOCAL_SYSCODE_PATH)
+    conn.register("syscode_tbl", df_syscode)
+  if os.path.exists(LOCAL_USER_ID_PATH):
+    df_user_id = pd.read_excel(LOCAL_USER_ID_PATH)
+    conn.register("user_id_tbl", df_user_id)
+except Exception as e:
+  st.warning(f"Perhatian saat membaca file Excel pendukung: {e}")
+
+st.success(
+    "⚡ File Parquet dan Data Pendukung dimuat secara instan menggunakan"
+    " DuckDB!"
+)
 
 try:
-  # --- QUERY DUCKDB UNTUK METRIK UTAMA DENGAN LOGIKA UNRUNSHEET BARU ---
+  # --- QUERY DUCKDB UTAMA UNTUK METRIK & KPI ---
   metrics_query = f"""
         WITH filtered_raw AS (
-            -- Exclude AWB CANCEL
             SELECT *
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             WHERE AWB_CANCEL IS NULL 
                OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' 
                OR AWB_CANCEL = '-'
+        ),
+        parsed_dates AS (
+            SELECT 
+                *,
+                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
+                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
+                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
+            FROM filtered_raw
         ),
         processed_data AS (
             SELECT 
@@ -140,39 +191,29 @@ try:
                 CONNOTE_RETURN_RF,
                 WUS_REMARKS,
                 
-                -- LOGIKA VALIDATION INBOUND
+                -- LOGIKA INBOUND
                 CASE 
-                    WHEN INBOUND_MANIFEST IS NOT NULL 
-                         AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' 
-                         AND UPPER(INBOUND_MANIFEST) LIKE 'MXG%' THEN 'VALID'
-                    
-                    WHEN UPPER(SERVICE) LIKE '%CTC%' 
-                         AND HVI_NO IS NOT NULL 
-                         AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' 
-                         AND UPPER(HVI_NO) LIKE 'MXG%' THEN 'VALID'
-                    
+                    WHEN INBOUND_MANIFEST IS NOT NULL AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' AND UPPER(INBOUND_MANIFEST) LIKE '%MXG%' THEN 'VALID'
+                    WHEN UPPER(SERVICE) LIKE '%CTC%' AND HVI_NO IS NOT NULL AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' AND UPPER(HVI_NO) LIKE '%MXG%' THEN 'VALID'
                     ELSE 'UNINBOUND'
                 END AS status_inbound_flag,
                 
-                -- LOGIKA UNRUNSHEET REVISI
+                -- LOGIKA UNRUNSHEET
                 CASE 
-                    -- Jika CONNOTE_RETURN_RT atau CONNOTE_RETURN_RF ADA ISINYA -> BUKAN UnRunsheet
                     WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
                       OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
                     THEN 'RUNSHEETED_OR_RETURN'
                     
-                    -- Jika RUNSHEET_NO KOSONG dan WUS_REMARKS mengandung HOC -> Unrunsheet AU
                     WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
                          AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
                     THEN 'UNRUNSHEET_AU'
                     
-                    -- Jika RUNSHEET_NO KOSONG -> UnRunsheet Biasa
                     WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-'
                     THEN 'UNRUNSHEET'
                     
                     ELSE 'RUNSHEETED_OR_RETURN'
                 END AS status_runsheet_flag
-            FROM filtered_raw
+            FROM parsed_dates
         )
         SELECT 
             COUNT(DISTINCT AWB) AS total_awb,
@@ -189,7 +230,7 @@ try:
   total_unrunsheet = metrics_df["total_unrunsheet"][0] or 0
   total_unrunsheet_au = metrics_df["total_unrunsheet_au"][0] or 0
 
-  # --- TAMPILAN KARTU METRIK (KPI) ---
+  # --- KARTU METRIK (KPI) ---
   c1, c2, c3, c4 = st.columns(4)
   c1.metric("📦 Total Unique AWB", f"{total_awb:,}")
   c2.metric("⚠️ Total UnInbound", f"{total_uninbound:,}")
@@ -202,7 +243,7 @@ try:
 
   st.markdown("---")
 
-  # --- QUERY DISTRIBUSI USIA UNRUNSHEET ---
+  # --- QUERY DISTRIBUSI USIA UNRUNSHEET (GRAFIK BATANG) ---
   st.subheader(
       "📊 Distribusi Usia Data UnRunsheet (Aging dari Max Inbound Date ke"
       " Hari Ini)"
@@ -216,44 +257,34 @@ try:
                OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' 
                OR AWB_CANCEL = '-'
         ),
-        processed_data AS (
+        parsed_dates AS (
             SELECT 
-                AWB,
-                RUNSHEET_NO,
-                CONNOTE_RETURN_RT,
-                CONNOTE_RETURN_RF,
-                WUS_REMARKS,
-                GREATEST(
-                    CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END,
-                    CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(HVI_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END,
-                    CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END
-                ) AS valid_inbound_date
+                *,
+                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
+                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
+                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
             FROM filtered_raw
             WHERE NOT (
                 (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
                 OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
             )
+        ),
+        processed_data AS (
+            SELECT 
+                AWB,
+                RUNSHEET_NO,
+                GREATEST(
+                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
+                ) AS valid_inbound_date
+            FROM parsed_dates
         ),
         unrunsheet_aging AS (
             SELECT 
@@ -300,7 +331,6 @@ try:
   df_aging = conn.execute(aging_query).fetchdf()
 
   selected_aging_group = "Semua Aging"
-
   col_chart, col_table = st.columns([2, 1])
 
   with col_chart:
@@ -312,7 +342,6 @@ try:
           text="total_awb",
           labels={"aging_group": "", "total_awb": ""},
       )
-
       fig.update_traces(
           textposition="outside",
           marker_color="rgba(30, 110, 220, 0.4)",
@@ -320,7 +349,6 @@ try:
           marker_line_width=2,
           width=0.3,
       )
-
       fig.update_layout(
           plot_bgcolor="rgba(40, 40, 40, 0.8)",
           paper_bgcolor="rgba(0, 0, 0, 0)",
@@ -332,7 +360,6 @@ try:
           margin=dict(l=20, r=20, t=30, b=20),
           height=380,
       )
-
       st.plotly_chart(fig, use_container_width=True)
     else:
       st.info("Tidak ada data UnRunsheet.")
@@ -345,7 +372,6 @@ try:
         on_select="rerun",
         selection_mode="single-row",
     )
-
     selected_rows = event.selection.get("rows", [])
     if selected_rows:
       selected_index = selected_rows[0]
@@ -356,44 +382,171 @@ try:
 
   st.markdown("---")
 
-  # --- TABEL DETAIL AWB UNRUNSHEET DENGAN FILTER & DOWNLOAD ---
+  # =========================================================
+  # 🗂️ TABEL PIVOT BERJENJANG (UNRUNSHEET BY LAST LOCATION)
+  # =========================================================
+  st.subheader(
+      "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang ➔"
+      " Zona ➔ Kecamatan)"
+  )
+
+  pivot_query = f"""
+        WITH filtered_raw AS (
+            SELECT *
+            FROM read_parquet('{LOCAL_PARQUET_PATH}')
+            WHERE AWB_CANCEL IS NULL 
+               OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' 
+               OR AWB_CANCEL = '-'
+        ),
+        parsed_dates AS (
+            SELECT 
+                *,
+                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
+                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
+                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
+            FROM filtered_raw
+            WHERE NOT (
+                (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+                OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+            )
+        ),
+        calculated AS (
+            SELECT 
+                p.*,
+                GREATEST(
+                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
+                ) AS valid_inbound_date
+            FROM parsed_dates p
+            WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
+        ),
+        with_location AS (
+            SELECT 
+                c.*,
+                CASE 
+                    WHEN valid_inbound_date IS NULL THEN NULL
+                    WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
+                    WHEN valid_inbound_date = dt_hvo THEN HVO_HUB_NAME
+                    WHEN valid_inbound_date = dt_hvi THEN HVO_HUB_DESTINATION_NAME
+                    WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
+                    WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
+                    WHEN valid_inbound_date = dt_tm  THEN TRANSIT_LOCATION
+                    ELSE NULL
+                END AS LAST_LOCATION,
+                DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP) AS age_days
+            FROM calculated c
+            WHERE valid_inbound_date IS NOT NULL
+        )
+        SELECT 
+            COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
+            COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
+            COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
+            COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
+            CASE 
+                WHEN age_days <= 0 THEN 'H+0'
+                WHEN age_days = 1 THEN 'H+1'
+                WHEN age_days = 2 THEN 'H+2'
+                WHEN age_days = 3 THEN 'H+3'
+                WHEN age_days = 4 THEN 'H+4'
+                WHEN age_days = 5 THEN 'H+5'
+                WHEN age_days = 6 THEN 'H+6'
+                WHEN age_days = 7 THEN 'H+7'
+                ELSE '>H+7'
+            END AS aging_group,
+            w.AWB
+        FROM with_location w
+        LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
+    """
+
+  df_pivot_raw = conn.execute(pivot_query).fetchdf()
+
+  if not df_pivot_raw.empty:
+    expected_cols = [
+        "H+0",
+        "H+1",
+        "H+2",
+        "H+3",
+        "H+4",
+        "H+5",
+        "H+6",
+        "H+7",
+        ">H+7",
+    ]
+
+    # Buat pilihan expand per Last Location agar mirip klik (+) di Excel
+    unique_locations = sorted(df_pivot_raw["LAST_LOCATION"].dropna().unique())
+
+    col_opt1, col_opt2 = st.columns([2, 2])
+    with col_opt1:
+      chosen_loc = st.selectbox(
+          "🔍 Pilih / Filter Last Location:",
+          ["Semua Last Location"] + list(unique_locations),
+      )
+
+    if chosen_loc == "Semua Last Location":
+      filtered_pivot_df = df_pivot_raw
+    else:
+      filtered_pivot_df = df_pivot_raw[
+          df_pivot_raw["LAST_LOCATION"] == chosen_loc
+      ]
+
+    # Generate Pivot Table Pandas
+    df_pivot = pd.pivot_table(
+        filtered_pivot_df,
+        index=["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"],
+        columns="aging_group",
+        values="AWB",
+        aggfunc="count",
+        fill_value=0,
+    )
+
+    existing_cols = [c for c in expected_cols if c in df_pivot.columns]
+    other_cols = [c for c in df_pivot.columns if c not in expected_cols]
+    df_pivot = df_pivot[existing_cols + other_cols]
+    df_pivot["Grand Total"] = df_pivot.sum(axis=1)
+
+    st.dataframe(df_pivot, use_container_width=True)
+
+    # Opsi Expand/Collapse per Wilayah (Mirip Accordion Excel)
+    with st.expander(
+        "📂 Buka Mode Rinci (Expand / Collapse per Last Location)"
+    ):
+      for loc in unique_locations:
+        with st.expander(f"📍 {loc}"):
+          sub_df = df_pivot_raw[df_pivot_raw["LAST_LOCATION"] == loc]
+          sub_pivot = pd.pivot_table(
+              sub_df,
+              index=["Cabang", "Zona", "Kecamatan"],
+              columns="aging_group",
+              values="AWB",
+              aggfunc="count",
+              fill_value=0,
+          )
+          sub_cols = [c for c in expected_cols if c in sub_pivot.columns]
+          sub_pivot = sub_pivot[sub_cols]
+          sub_pivot["Grand Total"] = sub_pivot.sum(axis=1)
+          st.dataframe(sub_pivot, use_container_width=True)
+  else:
+    st.info("Tidak ada data untuk tabel pivot UnRunsheet.")
+
+  st.markdown("---")
+
+  # =========================================================
+  # 📋 TABEL DETAIL AWB UNRUNSHEET (DENGAN FILTER & DOWNLOAD)
+  # =========================================================
   st.subheader(f"📋 Detail AWB UnRunsheet — Kategori: [{selected_aging_group}]")
 
   aging_where_clause = ""
   if selected_aging_group != "Semua Aging":
-    if selected_aging_group == "H+0":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) <= 0"
-      )
-    elif selected_aging_group == "H+1":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 1"
-      )
-    elif selected_aging_group == "H+2":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 2"
-      )
-    elif selected_aging_group == "H+3":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 3"
-      )
-    elif selected_aging_group == "H+4":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 4"
-      )
-    elif selected_aging_group == "H+5":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 5"
-      )
-    elif selected_aging_group == "H+6":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 6"
-      )
-    elif selected_aging_group == "H+7":
-      aging_where_clause = (
-          "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = 7"
-      )
-    elif selected_aging_group == ">H+7":
+    aging_where_clause = f"AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) = {selected_aging_group.replace('H+', '')}"
+    if selected_aging_group == ">H+7":
       aging_where_clause = (
           "AND DATEDIFF('day', tanggal_max_inbound, CURRENT_TIMESTAMP) > 7"
       )
@@ -406,45 +559,36 @@ try:
                OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' 
                OR AWB_CANCEL = '-'
         ),
+        parsed_dates AS (
+            SELECT 
+                *,
+                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
+                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
+                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
+            FROM filtered_raw
+            WHERE NOT (
+                (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+                OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+            )
+        ),
         processed_data AS (
             SELECT 
                 AWB,
                 SERVICE,
                 RUNSHEET_NO,
                 WUS_REMARKS,
-                CONNOTE_RETURN_RT,
-                CONNOTE_RETURN_RF,
                 GREATEST(
-                    CASE WHEN UPPER(INBOUND_MANIFEST) LIKE 'MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END,
-                    CASE WHEN UPPER(HVI_NO) LIKE 'MXG%' AND HVI_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(HVI_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END,
-                    CASE WHEN UPPER(MANIFEST_INBOUND_SUBAGEN_NO) LIKE 'MXG%' AND MANIFEST_INBOUND_SUBAGEN_DATE IS NOT NULL THEN 
-                        COALESCE(
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'),
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'),
-                            TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'),
-                            TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
-                        )
-                    ELSE NULL END
+                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
                 ) AS tanggal_max_inbound
-            FROM filtered_raw
-            WHERE NOT (
-                (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-                OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-            )
+            FROM parsed_dates
         )
         SELECT 
             AWB,
@@ -464,7 +608,6 @@ try:
     """
 
   df_unrunsheet_detail = conn.execute(unrunsheet_detail_query).fetchdf()
-
   st.dataframe(df_unrunsheet_detail, use_container_width=True)
 
   csv_data = df_unrunsheet_detail.to_csv(index=False).encode("utf-8")
@@ -475,72 +618,5 @@ try:
       mime="text/csv",
   )
 
-  st.markdown("---")
-
-  # --- TABEL RINCIAN DATA GABUNGAN UMUM (SAMPLE 100 ROW) ---
-  st.subheader("🔍 Detail Data Gabungan Seluruh Bulan (Sample 100 Row)")
-
-  detail_query = f"""
-        WITH filtered_raw AS (
-            SELECT *
-            FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            WHERE AWB_CANCEL IS NULL 
-               OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' 
-               OR AWB_CANCEL = '-'
-        )
-        SELECT 
-            AWB,
-            ID_ACCOUNT,
-            SHIPPER_NAME,
-            CONSIGNEE_NAME,
-            ORIGIN,
-            DEST,
-            SERVICE,
-            INBOUND_MANIFEST,
-            INBOUND_MANIFEST_DATE,
-            HVI_NO,
-            HVI_DATE,
-            MANIFEST_INBOUND_SUBAGEN_NO,
-            MANIFEST_INBOUND_SUBAGEN_DATE,
-            CONNOTE_RETURN_RT,
-            CONNOTE_RETURN_RF,
-            WUS_REMARKS,
-            CASE 
-                WHEN (INBOUND_MANIFEST IS NOT NULL AND TRIM(CAST(INBOUND_MANIFEST AS VARCHAR)) != '' AND UPPER(INBOUND_MANIFEST) LIKE 'MXG%')
-                     OR (UPPER(SERVICE) LIKE '%CTC%' AND HVI_NO IS NOT NULL AND TRIM(CAST(HVI_NO AS VARCHAR)) != '' AND UPPER(HVI_NO) LIKE 'MXG%')
-                THEN 'Inbound Valid'
-                ELSE 'UnInbound'
-            END AS Status_Inbound,
-            COALESCE(RUNSHEET_NO, '-') AS RUNSHEET_NO,
-            CASE 
-                WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-                  OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-                THEN 'Return'
-                
-                WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-')
-                     AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
-                THEN '🚨 Unrunsheet AU'
-                
-                WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) = '' OR RUNSHEET_NO = '-' 
-                THEN '🚨 UnRunsheet'
-                
-                ELSE 'Runsheeted'
-            END AS Status_Runsheet
-        FROM filtered_raw
-        LIMIT 100
-    """
-
-  df_result = conn.execute(detail_query).fetchdf()
-  st.dataframe(df_result, use_container_width=True)
-
-  # --- EXPANDER TABEL PRATINJAU PARQUET ---
-  with st.expander("📄 Lihat Pratinjau Data Mentah Parquet (50 Row)"):
-    st.dataframe(
-        conn.execute(
-            f"SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}') LIMIT 50"
-        ).fetchdf(),
-        use_container_width=True,
-    )
-
 except Exception as e:
-  st.error(f"Terjadi kesalahan saat memproses data Parquet: {e}")
+  st.error(f"Terjadi kesalahan saat memproses data & pivot table: {e}")
