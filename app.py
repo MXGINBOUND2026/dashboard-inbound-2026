@@ -32,6 +32,13 @@ def get_drive_service():
   # Cek apakah berjalan di Streamlit Cloud menggunakan Secrets
   if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
     creds_dict = dict(st.secrets["gcp_service_account"])
+
+    # FITUR PENYELESAI ERROR PEM: Konversi \n literal menjadi karakter newline yang sah
+    if "private_key" in creds_dict:
+      creds_dict["private_key"] = creds_dict["private_key"].replace(
+          "\\n", "\n"
+      )
+
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
@@ -48,7 +55,6 @@ def get_drive_service():
       )
 
   return build("drive", "v3", credentials=creds)
-
 
 @st.cache_resource
 def sync_parquet_from_gdrive():
