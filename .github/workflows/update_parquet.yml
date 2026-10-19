@@ -1,7 +1,7 @@
 name: Auto Update Parquet Pipeline
 
 on:
-  workflow_dispatch: # Mengizinkan Anda menjalankan proses dari tab Actions kapan saja
+  workflow_dispatch:
 
 jobs:
   run-pipeline:
@@ -20,10 +20,8 @@ jobs:
           pip install --upgrade pip
           pip install gdown duckdb google-api-python-client google-auth-httplib2 google-auth-oauthlib pyarrow
 
-      - name: Generate credentials.json
-        run: |
-          echo '${{ secrets.GDRIVE_CREDENTIALS }}' > credentials.json
-
       - name: Run Convert Script
+        env:
+          GDRIVE_CREDENTIALS_B64: ${{ secrets.GDRIVE_CREDENTIALS_B64 }}
         run: |
           python convert_to_parquet.py
