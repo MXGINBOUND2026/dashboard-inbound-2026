@@ -1,9 +1,10 @@
-import os
 import io
+import json
+import os
 import shutil
 import duckdb
-from googleapiclient.discovery import build
 from google.oauth2 import service_account
+from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 # =========================================================
@@ -15,55 +16,88 @@ TEMP_CSV_DIR = "temp_csv_files"
 OUTPUT_PARQUET = "data_inbound_2026.parquet"
 SERVICE_ACCOUNT_FILE = "credentials.json"
 
+
 def get_drive_service():
-    creds = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/drive']
+  SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+  # 1. Cek apakah kredensial disediakan melalui Environment Variable (untuk GitHub Actions)
+  gcp_secret_raw = os.environ.get("GCP_SERVICE_ACCOUNT")
+
+  if gcp_secret_raw:
+    try:
+      creds_dict = json.loads(gcp_secret_raw)
+    except Exception as e:
+      raise ValueError(f"Gagal memparsing JSON dari GCP_SERVICE_ACCOUNT: {e}")
+  # 2. Fallback menggunakan file fisik lokal (jika ada)
+  elif os.path.exists(SERVICE_ACCOUNT_FILE):
+    with open(SERVICE_ACCOUNT_FILE, "r") as f:
+      creds_dict = json.load(f)
+  else:
+    raise FileNotFoundError(
+        "Kredensial Google Cloud tidak ditemukan (Environment Variable"
+        " 'GCP_SERVICE_ACCOUNT' atau file 'credentials.json' tidak ada)."
     )
-    return build('drive', 'v3', credentials=creds)
+
+  # Penanganan mutlak format private_key agar tidak terkena Invalid JWT Signature
+  if "private_key" in creds_dict:
+    pk = str(creds_dict["private_key"])
+    pk = pk.replace("\\n", "\n")
+    creds_dict["private_key"] = pk.strip()
+
+  creds = service_account.Credentials.from_service_account_info(
+      creds_dict, scopes=SCOPES
+  )
+  return build("drive", "v3", credentials=creds)
+
 
 def download_gdrive_folder(service, folder_id, local_path):
-    if not os.path.exists(local_path):
-        os.makedirs(local_path)
-    
-    page_token = None
-    while True:
-        query = f"'{folder_id}' in parents and trashed = false"
-        results = service.files().list(
+  if not os.path.exists(local_path):
+    os.makedirs(local_path)
+
+  page_token = None
+  while True:
+    query = f"'{folder_id}' in parents and trashed = false"
+    results = (
+        service.files()
+        .list(
             q=query,
             pageSize=100,
             fields="nextPageToken, files(id, name, mimeType)",
-            pageToken=page_token
-        ).execute()
-        
-        items = results.get('files', [])
-        for item in items:
-            file_id = item['id']
-            file_name = item['name']
-            mime_type = item['mimeType']
-            
-            # Abaikan file output parquet jika ada di folder
-            if file_name == OUTPUT_PARQUET:
-                continue
-                
-            local_item_path = os.path.join(local_path, file_name)
-            
-            if mime_type == 'application/vnd.google-apps.folder':
-                download_gdrive_folder(service, file_id, local_item_path)
-            else:
-                print(f"Mengunduh file: {file_name}")
-                request = service.files().get_media(fileId=file_id)
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk()
-                
-                with open(local_item_path, 'wb') as f:
-                    f.write(fh.getvalue())
-                    
-        page_token = results.get('nextPageToken')
-        if not page_token:
-            break
+            pageToken=page_token,
+        )
+        .execute()
+    )
+
+    items = results.get("files", [])
+    for item in items:
+      file_id = item["id"]
+      file_name = item["name"]
+      mime_type = item["mimeType"]
+
+      # Abaikan file output parquet jika ada di folder
+      if file_name == OUTPUT_PARQUET:
+        continue
+
+      local_item_path = os.path.join(local_path, file_name)
+
+      if mime_type == "application/vnd.google-apps.folder":
+        download_gdrive_folder(service, file_id, local_item_path)
+      else:
+        print(f"Mengunduh file: {file_name}")
+        request = service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+          status, done = downloader.next_chunk()
+
+        with open(local_item_path, "wb") as f:
+          f.write(fh.getvalue())
+
+    page_token = results.get("nextPageToken")
+    if not page_token:
+      break
+
 
 # =========================================================
 # 1. PROSES UTAMA
@@ -72,7 +106,7 @@ print("1. Menghubungkan ke Google Drive API...")
 service = get_drive_service()
 
 if os.path.exists(TEMP_CSV_DIR):
-    shutil.rmtree(TEMP_CSV_DIR)
+  shutil.rmtree(TEMP_CSV_DIR)
 
 print("2. Mengunduh seluruh file CSV dari Google Drive...")
 download_gdrive_folder(service, TARGET_GDRIVE_FOLDER_ID, TEMP_CSV_DIR)
@@ -99,31 +133,30 @@ print("Folder CSV sementara di lokal telah dibersihkan.")
 # 4. UPLOAD / UPDATE PARQUET KEMBALI KE GOOGLE DRIVE
 # =========================================================
 print("\n4. Mengunggah file Parquet ke Google Drive...")
-media = MediaFileUpload(OUTPUT_PARQUET, mimetype='application/octet-stream', resumable=True)
+media = MediaFileUpload(
+    OUTPUT_PARQUET, mimetype="application/octet-stream", resumable=True
+)
 
 query = f"'{TARGET_GDRIVE_FOLDER_ID}' in parents and name = '{OUTPUT_PARQUET}' and trashed = false"
 results = service.files().list(q=query, fields="files(id, name)").execute()
-items = results.get('files', [])
+items = results.get("files", [])
 
 if items:
-    file_id = items[0]['id']
-    print("Menghapus file lama sebelum mengunggah versi baru...")
-    try:
-        service.files().delete(fileId=file_id).execute()
-    except Exception as e:
-        print(f"Info: {e}")
+  file_id = items[0]["id"]
+  print("Menghapus file lama sebelum mengunggah versi baru...")
+  try:
+    service.files().delete(fileId=file_id).execute()
+  except Exception as e:
+    print(f"Info: {e}")
 
 print("Mengunggah file Parquet baru ke Drive...")
-file_metadata = {
-    'name': OUTPUT_PARQUET,
-    'parents': [TARGET_GDRIVE_FOLDER_ID]
-}
+file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
 
 # Upload file baru
-uploaded_file = service.files().create(
-    body=file_metadata, 
-    media_body=media, 
-    fields='id'
-).execute()
+uploaded_file = (
+    service.files()
+    .create(body=file_metadata, media_body=media, fields="id")
+    .execute()
+)
 
 print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
