@@ -287,55 +287,65 @@ query_duckdb = f"""
                 
                 -- HIRARKI STATUS SHIPMENT
                 CASE 
+                    -- 1. AWB Cancel: Jika AWB_CANCEL bernilai Y
                     WHEN UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'Y' THEN 'AWB Cancel'
+                    
+                    -- 2. Jika POD_Category sudah ada isinya (Success, Breach, Claim, Close By System, dll.)
+                    WHEN POD_Category IS NOT NULL AND TRIM(CAST(POD_Category AS VARCHAR)) != '' AND POD_Category != '-' THEN POD_Category
+                    
+                    -- 3. UnReceiving
                     WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
                     
+                    -- 4. UnOutbound (Pengecualian Service CTC)
                     WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
                          AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVO_DATE IS NULL AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' AND OUTBOUND_MANIFEST_DATE IS NOT NULL) 
                     THEN 'UnOutbound'
                     
-                    WHEN (INBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(INBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR INBOUND_MANIFEST_DATE = '-')
-                         AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVI_DATE IS NULL AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL) 
+                    -- 5. UnInbound (Last_Inbound KOSONG, KECUALI jika SERVICE CTC dan DATE_RUNSHEET ADA ISI)
+                    WHEN valid_inbound_date IS NULL
+                         AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND DATE_RUNSHEET IS NOT NULL AND TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) != '' AND DATE_RUNSHEET != '-')
                     THEN 'UnInbound'
                     
+                    -- 6. UnMTI
                     WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' 
                          AND (MANIFEST_INBOUND_SUBAGEN_NO IS NULL OR TRIM(CAST(MANIFEST_INBOUND_SUBAGEN_NO AS VARCHAR)) = '' OR MANIFEST_INBOUND_SUBAGEN_NO = '-') 
                     THEN 'UnMTI'
                     
+                    -- 7. Unrunsheet AU (HOC)
+                    WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
+                         AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HOC%'
+                    THEN 'Unrunsheet AU (HOC)'
+
+                    -- 8. UnRunsheet with PRA
                     WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
                          AND UPPER(COALESCE(PRA_RUNSHEET_NO, '')) LIKE '%MXG%' 
                     THEN 'UnRunsheet with PRA'
                     
+                    -- 9. UnRunsheet
                     WHEN DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-' 
                     THEN 'UnRunsheet'
                     
-                    WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
-                         AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HOC%'
-                    THEN 'Unrunsheet AU (HOC)'
-                    
+                    -- 10. On Delivery Today
                     WHEN DATE_RUNSHEET IS NOT NULL AND CAST(dt_run AS DATE) = CURRENT_DATE 
                          AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
                     THEN 'On Delivery Today'
                     
+                    -- 11. Open POD
                     WHEN DATE_RUNSHEET IS NOT NULL 
                          AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
                     THEN 'Open POD'
                     
+                    -- 12. Success UnHRS
                     WHEN UPPER(COALESCE(STATUS_POD, '')) IN ('SUCCESS', 'RETURN SHIPPER') 
                          AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) NOT LIKE '%HRS%' 
                     THEN 'Success UnHRS'
                     
+                    -- 13. UnHRS
                     WHEN (CODING IS NOT NULL AND TRIM(CAST(CODING AS VARCHAR)) != '' AND CODING != '-')
                          AND (WUS_REMARKS IS NULL OR TRIM(CAST(WUS_REMARKS AS VARCHAR)) = '' OR WUS_REMARKS = '-')
-                         AND UPPER(COALESCE(POD_Category, '')) NOT IN (
-                             'CLAIM MISSING PROCESS', 'CLAIM DAMAGE PROCESS', 'CLOSE BY SYSTEM (ORIGIN)', 
-                             'CLOSE BY SYSTEM (DEST)', 'CUSTOMER REQUEST CANCEL', 'CUSTOMER REQUEST', 
-                             'SUCCESS CLAIM', 'BREACH', 'KIRIMAN DISITA OLEH BEA CUKAI', 
-                             'KIRIMAN DISITA OLEH KEPOLISIAN', 'KIRIMAN RETURN BREACH', 'MISSING'
-                         ) 
                     THEN 'UnHRS'
                     
-                    ELSE COALESCE(POD_Category, 'UNKNOWN')
+                    ELSE 'UNKNOWN'
                 END AS Status_Shipment,
 
                 -- AGING SHIPMENT (SUCCESS DELIVERY & SUCCESS RETURN SHIPPER KE TGL_RECEIVED, LAINNYA KE HARI INI)
