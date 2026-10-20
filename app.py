@@ -338,7 +338,6 @@ try:
           ]
           st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
 
-    # Buat klausul filter tambahan berdasarkan aging yang dipilih di tabel
     aging_clause = (
         f"AND aging_group = '{selected_aging_group}'"
         if selected_aging_group != "Semua Aging"
@@ -347,7 +346,7 @@ try:
 
     st.markdown("---")
 
-    # Tabel Matrix Status Shipment (Ikut terfilter aging jika dipilih)
+    # Tabel Matrix Status Shipment
     st.subheader(
         f"📊 Tabel Matrix Status Shipment (Filter Aging: [{selected_aging_group}])"
     )
@@ -372,7 +371,7 @@ try:
 
     st.markdown("---")
 
-    # Tabel Pivot Unrunsheet (Ikut terfilter aging jika dipilih)
+    # Tabel Pivot Unrunsheet
     st.subheader(
         f"🗂️ Unrunsheet By Last Location (Filter Aging: [{selected_aging_group}])"
     )
@@ -409,10 +408,62 @@ try:
             SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, POD_Category, POD_DESC, WUS_REMARKS
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)') {aging_clause}
+            ORDER BY age_days DESC
             LIMIT 1000
         """).fetchdf()
 
     st.dataframe(df_detail, use_container_width=True)
+
+    # Tabel Detail per Status Shipment
+    st.markdown("---")
+    st.subheader(
+        f"📋 Detail AWB Berdasarkan Status Shipment — [{chosen_status}]"
+    )
+
+    status_detail_clause = ""
+    if chosen_status != "Semua Status":
+      status_detail_clause = f"AND Status_Shipment = '{chosen_status}'"
+
+    df_status_detail = conn.execute(f"""
+        SELECT 
+            AWB, 
+            SERVICE, 
+            Status_Shipment, 
+            POD_Category, 
+            POD_DESC, 
+            Last_Inbound, 
+            age_days AS "Aging (Hari)", 
+            aging_group AS "Kategori Aging", 
+            LAST_LOCATION, 
+            Cabang, 
+            Zona, 
+            Kecamatan, 
+            WUS_REMARKS
+        FROM read_parquet('{LOCAL_PARQUET_PATH}')
+        {where_sql} {aging_clause} {status_detail_clause}
+        ORDER BY age_days DESC
+        LIMIT 1000
+    """).fetchdf()
+
+    if not df_status_detail.empty:
+      st.caption(
+          f"Total AWB Ditampilkan: **{len(df_status_detail):,}** (Maksimal 1.000"
+          " baris)"
+      )
+      st.dataframe(df_status_detail, use_container_width=True, height=400)
+
+      csv_status = df_status_detail.to_csv(index=False).encode("utf-8")
+      st.download_button(
+          label=f"📥 Download Data Detail Status [{chosen_status}] (CSV)",
+          data=csv_status,
+          file_name=f"Detail_AWB_Status_{chosen_status.replace(' ', '_')}.csv",
+          mime="text/csv",
+      )
+    else:
+      st.info(
+          "Tidak ada data AWB yang cocok dengan kombinasi filter Status"
+          " Shipment & Aging yang dipilih."
+      )
 
   else:
     st.subheader(
@@ -422,6 +473,7 @@ try:
             SELECT AWB, Cabang, Zona, Kecamatan, age_days AS "Aging (Hari)", SERVICE, Status_Shipment
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             {where_sql} AND Status_Shipment = 'UnInbound'
+            ORDER BY age_days DESC
             LIMIT 1000
         """).fetchdf()
 
