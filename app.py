@@ -117,7 +117,7 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 
 conn = duckdb.connect()
 
-# Pembacaan File Excel Pendukung dengan Aman (Safe Fallback)
+# Load Data Pendukung dengan Safe Fallback
 try:
   if os.path.exists(LOCAL_SYSCODE_PATH):
     try:
@@ -148,17 +148,12 @@ except Exception as e:
   st.warning(f"Perhatian saat membaca file Excel pendukung: {e}")
 
 # =========================================================
-# QUERY DATA UTAMA DENGAN LOGIKA STATUS & AGING SHIPMENT
+# QUERY DATA UTAMA DARI PARQUET
 # =========================================================
-base_unrunsheet_query = f"""
+base_query = f"""
     WITH filtered_raw AS (
         SELECT *
         FROM read_parquet('{LOCAL_PARQUET_PATH}')
-        WHERE (AWB_CANCEL IS NULL OR UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'Y')
-          AND NOT (
-              (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-              OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-          )
     ),
     parsed_dates AS (
         SELECT 
@@ -215,7 +210,7 @@ base_unrunsheet_query = f"""
                 ELSE NULL
             END AS LAST_LOCATION,
             
-            -- LOGIKA STATUS SHIPMENT
+            -- LOGIKA HIERARKI STATUS SHIPMENT
             CASE 
                 WHEN AWB_CANCEL IS NOT NULL AND TRIM(CAST(AWB_CANCEL AS VARCHAR)) != '' AND UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'N' THEN 'AWB Cancel'
                 WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
@@ -238,6 +233,11 @@ base_unrunsheet_query = f"""
                 
                 WHEN DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-' 
                 THEN 'UnRunsheet'
+                
+                -- PUNCAK PERUBAHAN 1: STATUS UnRunsheet AU (HOC)
+                WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
+                     AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HOC%'
+                THEN 'UnRunsheet AU (HOC)'
                 
                 WHEN DATE_RUNSHEET IS NOT NULL AND CAST(dt_run AS DATE) = CURRENT_DATE 
                      AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
@@ -298,22 +298,21 @@ base_unrunsheet_query = f"""
         END AS aging_group
     FROM with_status_and_aging w
     LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
-    WHERE (w.RUNSHEET_NO IS NULL OR TRIM(CAST(w.RUNSHEET_NO AS VARCHAR)) == '' OR w.RUNSHEET_NO = '-')
-      AND w.valid_inbound_date IS NOT NULL
 """
 
-df_pivot_raw = conn.execute(base_unrunsheet_query).fetchdf()
+df_raw_all = conn.execute(base_query).fetchdf()
 
 # =========================================================
-# SIDEBAR FILTERS
+# SIDEBAR FILTERS (TERMASUK FILTER SHIPMENT STATUS)
 # =========================================================
 st.sidebar.markdown("---")
-st.sidebar.header("🔍 Filter Data UnRunsheet")
+st.sidebar.header("🔍 Filter Data Dashboard")
 
-unique_locations = sorted(df_pivot_raw["LAST_LOCATION"].dropna().unique())
-unique_cabang = sorted(df_pivot_raw["Cabang"].dropna().unique())
-unique_zona = sorted(df_pivot_raw["Zona"].dropna().unique())
-unique_kecamatan = sorted(df_pivot_raw["Kecamatan"].dropna().unique())
+unique_locations = sorted(df_raw_all["LAST_LOCATION"].dropna().unique())
+unique_cabang = sorted(df_raw_all["Cabang"].dropna().unique())
+unique_zona = sorted(df_raw_all["Zona"].dropna().unique())
+unique_kecamatan = sorted(df_raw_all["Kecamatan"].dropna().unique())
+unique_status = sorted(df_raw_all["Status_Shipment"].dropna().unique())
 
 chosen_loc = st.sidebar.selectbox(
     "🔍 Filter Last Location:", ["Semua Last Location"] + list(unique_locations)
@@ -328,23 +327,23 @@ chosen_kecamatan = st.sidebar.selectbox(
     "📍 Filter Kecamatan:", ["Semua Kecamatan"] + list(unique_kecamatan)
 )
 
-filtered_pivot_df = df_pivot_raw.copy()
+# PERMINTAAN 5: FILTER SHIPMENT_STATUS DI SIDEBAR
+chosen_status = st.sidebar.selectbox(
+    "📦 Filter Shipment Status:", ["Semua Status"] + list(unique_status)
+)
+
+# PROSES FILTERING GLOBAL DF BERDASARKAN SELURUH FILTER SIDEBAR
+filtered_df = df_raw_all.copy()
 if chosen_loc != "Semua Last Location":
-  filtered_pivot_df = filtered_pivot_df[
-      filtered_pivot_df["LAST_LOCATION"] == chosen_loc
-  ]
+  filtered_df = filtered_df[filtered_df["LAST_LOCATION"] == chosen_loc]
 if chosen_cabang != "Semua Cabang":
-  filtered_pivot_df = filtered_pivot_df[
-      filtered_pivot_df["Cabang"] == chosen_cabang
-  ]
+  filtered_df = filtered_df[filtered_df["Cabang"] == chosen_cabang]
 if chosen_zona != "Semua Zona":
-  filtered_pivot_df = filtered_pivot_df[
-      filtered_pivot_df["Zona"] == chosen_zona
-  ]
+  filtered_df = filtered_df[filtered_df["Zona"] == chosen_zona]
 if chosen_kecamatan != "Semua Kecamatan":
-  filtered_pivot_df = filtered_pivot_df[
-      filtered_pivot_df["Kecamatan"] == chosen_kecamatan
-  ]
+  filtered_df = filtered_df[filtered_df["Kecamatan"] == chosen_kecamatan]
+if chosen_status != "Semua Status":
+  filtered_df = filtered_df[filtered_df["Status_Shipment"] == chosen_status]
 
 # =========================================================
 # RUNNING TEXT & DASHBOARD METRICS
@@ -371,8 +370,8 @@ except Exception:
   formatted_date = "Format tanggal tidak dikenali"
 
 top_kecamatan_df = (
-    filtered_pivot_df.groupby("Kecamatan")["AWB"]
-    .count()
+    filtered_df.groupby("Kecamatan")["AWB"]
+    .nunique()
     .reset_index(name="total")
     .sort_values(by="total", ascending=False)
     .head(5)
@@ -398,203 +397,197 @@ st.markdown(
 if "active_view" not in st.session_state:
   st.session_state.active_view = "UnRunsheet"
 
-try:
-  metrics_query = f"""
-        WITH filtered_raw AS (
-            SELECT *
-            FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            WHERE (AWB_CANCEL IS NULL OR UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'Y')
-              AND NOT (
-                  (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-                  OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-              )
-        ),
-        parsed_dates AS (
+# PERMINTAAN 2 & 3: KARTU METRIK DIHITUNG DARI DATA TERFILTER SIDEBAR
+total_awb = filtered_df["AWB"].nunique()
+total_uninbound = filtered_df[filtered_df["Status_Shipment"] == "UnInbound"][
+    "AWB"
+].nunique()
+total_unrunsheet = filtered_df[
+    filtered_df["Status_Shipment"].isin(
+        ["UnRunsheet", "UnRunsheet with PRA", "UnRunsheet AU (HOC)"]
+    )
+]["AWB"].nunique()
+
+# Hitung Unrunsheet AU (HOC) khusus dari Status_Shipment
+total_unrunsheet_au = filtered_df[
+    filtered_df["Status_Shipment"] == "UnRunsheet AU (HOC)"
+]["AWB"].nunique()
+
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+  st.metric(label="📦 Total AWB", value=f"{total_awb:,}")
+with c2:
+  st.metric(label="⚠️ Total UnInbound", value=f"{total_uninbound:,}")
+  if st.button(
+      "👉 Lihat Data UnInbound", key="btn_uninbound", use_container_width=True
+  ):
+    st.session_state.active_view = "UnInbound"
+    st.rerun()
+with c3:
+  st.metric(label="🚨 Alert: Total UnRunsheet", value=f"{total_unrunsheet:,}")
+  if st.button(
+      "👉 Lihat Data UnRunsheet", key="btn_unrunsheet", use_container_width=True
+  ):
+    st.session_state.active_view = "UnRunsheet"
+    st.rerun()
+with c4:
+  st.metric(label="🚚 Unrunsheet AU (HOC)", value=f"{total_unrunsheet_au:,}")
+  if st.button(
+      "👉 Lihat UnRunsheet AU", key="btn_unrunsheet_au", use_container_width=True
+  ):
+    st.session_state.active_view = "UnRunsheet AU"
+    st.rerun()
+
+st.markdown("---")
+
+view_choice = st.radio(
+    "📌 Pilih Tampilan Data Dashboard:",
+    ["📊 Analisis UnRunsheet", "⚠️ Tabel UnInbound"],
+    horizontal=True,
+    index=1 if st.session_state.active_view == "UnInbound" else 0,
+)
+
+if view_choice == "📊 Analisis UnRunsheet":
+  st.subheader(
+      "📊 Distribusi Usia Data UnRunsheet (Aging dari Max Inbound /"
+      " TGL_RECEIVED ke Hari Ini)"
+  )
+
+  # Filter khusus UnRunsheet untuk grafik aging
+  df_unrun_only = filtered_df[
+      filtered_df["Status_Shipment"].isin(
+          ["UnRunsheet", "UnRunsheet with PRA", "UnRunsheet AU (HOC)"]
+      )
+  ]
+
+  if df_unrun_only.empty:
+    df_aging = pd.DataFrame(columns=["aging_group", "total_awb"])
+  else:
+    conn.register("filtered_awb_tbl", df_unrun_only[["AWB", "age_days"]])
+    aging_query = """
             SELECT 
-                *,
-                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
-                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
-                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti
-            FROM filtered_raw
-        ),
-        processed_data AS (
-            SELECT 
-                AWB,
-                RUNSHEET_NO,
-                SERVICE,
-                INBOUND_MANIFEST,
-                HVI_NO,
-                WUS_REMARKS,
-                CONNOTE_RETURN_RT,
-                CONNOTE_RETURN_RF,
-                GREATEST(
-                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
-                    CASE WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
-                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END
-                ) AS last_inbound_date,
                 CASE 
-                    WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
-                         AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
-                    THEN 'UNRUNSHEET_AU'
-                    WHEN RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-'
-                    THEN 'UNRUNSHEET'
-                    ELSE 'RUNSHEETED'
-                END AS status_runsheet_flag
-            FROM parsed_dates
-        )
-        SELECT 
-            COUNT(DISTINCT AWB) AS total_awb,
-            COUNT(
-                CASE 
-                    WHEN last_inbound_date IS NULL 
-                         AND (RUNSHEET_NO IS NULL OR UPPER(RUNSHEET_NO) NOT LIKE '%MXG%')
-                         AND (CONNOTE_RETURN_RT IS NULL OR TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) = '' OR CONNOTE_RETURN_RT = '-')
-                         AND (CONNOTE_RETURN_RF IS NULL OR TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) = '' OR CONNOTE_RETURN_RF = '-')
-                    THEN 1 
+                    WHEN age_days <= 0 THEN 'H+0'
+                    WHEN age_days = 1 THEN 'H+1'
+                    WHEN age_days = 2 THEN 'H+2'
+                    WHEN age_days = 3 THEN 'H+3'
+                    WHEN age_days = 4 THEN 'H+4'
+                    WHEN age_days = 5 THEN 'H+5'
+                    WHEN age_days = 6 THEN 'H+6'
+                    WHEN age_days = 7 THEN 'H+7'
+                    ELSE '>H+7'
+                END AS aging_group,
+                COUNT(DISTINCT AWB) AS total_awb
+            FROM filtered_awb_tbl
+            GROUP BY 1
+            ORDER BY 
+                CASE aging_group
+                    WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 
+                    WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8
                 END
-            ) AS total_uninbound,
-            COUNT(CASE WHEN status_runsheet_flag IN ('UNRUNSHEET', 'UNRUNSHEET_AU') THEN 1 END) AS total_unrunsheet,
-            COUNT(CASE WHEN status_runsheet_flag = 'UNRUNSHEET_AU' THEN 1 END) AS total_unrunsheet_au
-        FROM processed_data
-    """
-  metrics_df = conn.execute(metrics_query).fetchdf()
+        """
+    df_aging = conn.execute(aging_query).fetchdf()
 
-  total_awb = metrics_df["total_awb"][0] or 0
-  total_uninbound = metrics_df["total_uninbound"][0] or 0
-  total_unrunsheet = metrics_df["total_unrunsheet"][0] or 0
-  total_unrunsheet_au = metrics_df["total_unrunsheet_au"][0] or 0
+  selected_aging_group = "Semua Aging"
+  col_chart, col_table = st.columns([2, 1])
 
-  c1, c2, c3, c4 = st.columns(4)
-  with c1:
-    st.metric(label="📦 Total Unique AWB", value=f"{total_awb:,}")
-  with c2:
-    st.metric(label="⚠️ Total UnInbound", value=f"{total_uninbound:,}")
-    if st.button(
-        "👉 Lihat Data UnInbound", key="btn_uninbound", use_container_width=True
-    ):
-      st.session_state.active_view = "UnInbound"
-      st.rerun()
-  with c3:
-    st.metric(label="🚨 Alert: Total UnRunsheet", value=f"{total_unrunsheet:,}")
-    if st.button(
-        "👉 Lihat Data UnRunsheet",
-        key="btn_unrunsheet",
-        use_container_width=True,
-    ):
-      st.session_state.active_view = "UnRunsheet"
-      st.rerun()
-  with c4:
-    st.metric(label="🚚 Unrunsheet AU (HOC)", value=f"{total_unrunsheet_au:,}")
-    if st.button(
-        "👉 Lihat UnRunsheet AU", key="btn_unrunsheet_au", use_container_width=True
-    ):
-      st.session_state.active_view = "UnRunsheet AU"
-      st.rerun()
+  with col_chart:
+    if not df_aging.empty:
+      fig = px.bar(
+          df_aging,
+          x="aging_group",
+          y="total_awb",
+          text="total_awb",
+          labels={"aging_group": "", "total_awb": ""},
+      )
+      fig.update_traces(
+          textposition="outside",
+          marker_color="rgba(30, 110, 220, 0.4)",
+          marker_line_color="rgb(60, 150, 255)",
+          marker_line_width=2,
+          width=0.3,
+      )
+      fig.update_layout(
+          plot_bgcolor="rgba(40, 40, 40, 0.8)",
+          paper_bgcolor="rgba(0, 0, 0, 0)",
+          font=dict(color="#CCCCCC", size=13),
+          xaxis=dict(
+              type="category", tickangle=0, gridcolor="rgba(255, 255, 255, 0.05)"
+          ),
+          yaxis=dict(gridcolor="rgba(255, 255, 255, 0.08)"),
+          margin=dict(l=20, r=20, t=30, b=20),
+          height=380,
+      )
+      st.plotly_chart(fig, use_container_width=True)
+
+  with col_table:
+    st.markdown("**Klik / Pilih Baris Tabel di Bawah:**")
+    if not df_aging.empty:
+      event = st.dataframe(
+          df_aging,
+          use_container_width=True,
+          on_select="rerun",
+          selection_mode="single-row",
+      )
+      if event.selection.get("rows", []):
+        selected_aging_group = df_aging.iloc[event.selection["rows"][0]][
+            "aging_group"
+        ]
+        st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
 
   st.markdown("---")
 
-  view_choice = st.radio(
-      "📌 Pilih Tampilan Data Dashboard:",
-      ["📊 Analisis UnRunsheet", "⚠️ Tabel UnInbound"],
-      horizontal=True,
-      index=1 if st.session_state.active_view == "UnInbound" else 0,
+  # =========================================================
+  # PERMINTAAN 4: TABEL STATUS_SHIPMENT (MATRIX PIVOT)
+  # Header: Aging_Shipment, Row: Status_Shipment, Value: Distinct Count AWB
+  # =========================================================
+  st.subheader(
+      "📊 Tabel Matrix Status Shipment (Status Shipment ➔ Aging Shipment)"
   )
 
-  if view_choice == "📊 Analisis UnRunsheet":
-    st.subheader(
-        "📊 Distribusi Usia Data UnRunsheet (Aging dari Max Inbound /"
-        " TGL_RECEIVED ke Hari Ini)"
+  if not filtered_df.empty:
+    df_status_pivot = pd.pivot_table(
+        filtered_df,
+        index="Status_Shipment",
+        columns="aging_group",
+        values="AWB",
+        aggfunc="nunique",
+        fill_value=0,
     )
+    expected_cols = [
+        "H+0",
+        "H+1",
+        "H+2",
+        "H+3",
+        "H+4",
+        "H+5",
+        "H+6",
+        "H+7",
+        ">H+7",
+    ]
+    existing_cols = [c for c in expected_cols if c in df_status_pivot.columns]
+    df_status_pivot = df_status_pivot[existing_cols]
+    df_status_pivot["Grand Total"] = df_status_pivot.sum(axis=1)
 
-    if filtered_pivot_df.empty:
-      df_aging = pd.DataFrame(columns=["aging_group", "total_awb"])
-    else:
-      conn.register("filtered_awb_tbl", filtered_pivot_df[["AWB", "age_days"]])
-      aging_query = """
-                SELECT 
-                    CASE 
-                        WHEN age_days <= 0 THEN 'H+0'
-                        WHEN age_days = 1 THEN 'H+1'
-                        WHEN age_days = 2 THEN 'H+2'
-                        WHEN age_days = 3 THEN 'H+3'
-                        WHEN age_days = 4 THEN 'H+4'
-                        WHEN age_days = 5 THEN 'H+5'
-                        WHEN age_days = 6 THEN 'H+6'
-                        WHEN age_days = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END AS aging_group,
-                    COUNT(DISTINCT AWB) AS total_awb
-                FROM filtered_awb_tbl
-                GROUP BY 1
-                ORDER BY 
-                    CASE aging_group
-                        WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 
-                        WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8
-                    END
-            """
-      df_aging = conn.execute(aging_query).fetchdf()
+    st.dataframe(df_status_pivot, use_container_width=True)
+  else:
+    st.info("Tidak ada data untuk kombinasi filter yang dipilih.")
 
-    selected_aging_group = "Semua Aging"
-    col_chart, col_table = st.columns([2, 1])
+  st.markdown("---")
 
-    with col_chart:
-      if not df_aging.empty:
-        fig = px.bar(
-            df_aging,
-            x="aging_group",
-            y="total_awb",
-            text="total_awb",
-            labels={"aging_group": "", "total_awb": ""},
-        )
-        fig.update_traces(
-            textposition="outside",
-            marker_color="rgba(30, 110, 220, 0.4)",
-            marker_line_color="rgb(60, 150, 255)",
-            marker_line_width=2,
-            width=0.3,
-        )
-        fig.update_layout(
-            plot_bgcolor="rgba(40, 40, 40, 0.8)",
-            paper_bgcolor="rgba(0, 0, 0, 0)",
-            font=dict(color="#CCCCCC", size=13),
-            xaxis=dict(
-                type="category",
-                tickangle=0,
-                gridcolor="rgba(255, 255, 255, 0.05)",
-            ),
-            yaxis=dict(gridcolor="rgba(255, 255, 255, 0.08)"),
-            margin=dict(l=20, r=20, t=30, b=20),
-            height=380,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+  # TABEL PIVOT HIRARKI LOKASI
+  st.subheader(
+      "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang ➔"
+      " Zona ➔ Kecamatan)"
+  )
 
-    with col_table:
-      st.markdown("**Klik / Pilih Baris Tabel di Bawah:**")
-      if not df_aging.empty:
-        event = st.dataframe(
-            df_aging,
-            use_container_width=True,
-            on_select="rerun",
-            selection_mode="single-row",
-        )
-        if event.selection.get("rows", []):
-          selected_aging_group = df_aging.iloc[event.selection["rows"][0]][
-              "aging_group"
-          ]
-          st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
-
-    st.markdown("---")
-    st.subheader(
-        "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang"
-        " ➔ Zona ➔ Kecamatan)"
-    )
-
+  if not df_unrun_only.empty:
     df_pivot = pd.pivot_table(
-        filtered_pivot_df,
+        df_unrun_only,
         index=["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"],
         columns="aging_group",
         values="AWB",
-        aggfunc="count",
+        aggfunc="nunique",
         fill_value=0,
     )
     expected_cols = [
@@ -611,39 +604,62 @@ try:
     df_pivot = df_pivot[[c for c in expected_cols if c in df_pivot.columns]]
     df_pivot["Grand Total"] = df_pivot.sum(axis=1)
     st.dataframe(df_pivot, use_container_width=True)
+  else:
+    st.info("Tidak ada data Unrunsheet.")
 
-    st.subheader(
-        f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
-    )
-    df_detail_filtered = filtered_pivot_df.copy()
-    if selected_aging_group != "Semua Aging":
-      df_detail_filtered = df_detail_filtered[
-          df_detail_filtered["aging_group"] == selected_aging_group
-      ]
+  st.subheader(
+      f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
+  )
+  df_detail_filtered = df_unrun_only.copy()
+  if selected_aging_group != "Semua Aging":
+    df_detail_filtered = df_detail_filtered[
+        df_detail_filtered["aging_group"] == selected_aging_group
+    ]
 
+  st.dataframe(
+      df_detail_filtered[
+          [
+              "AWB",
+              "Last_Inbound",
+              "age_days",
+              "LAST_LOCATION",
+              "Kecamatan",
+              "SERVICE",
+              "Status_Shipment",
+              "POD_Category",
+              "POD_DESC",
+              "WUS_REMARKS",
+          ]
+      ].rename(columns={"age_days": "Aging (Hari)"}),
+      use_container_width=True,
+  )
+
+else:
+  st.subheader("⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)")
+  df_uninbound_show = filtered_df[filtered_df["Status_Shipment"] == "UnInbound"]
+
+  if not df_uninbound_show.empty:
     st.dataframe(
-        df_detail_filtered[
+        df_uninbound_show[
             [
                 "AWB",
-                "Last_Inbound",
-                "age_days",
-                "LAST_LOCATION",
+                "Cabang",
+                "Zona",
                 "Kecamatan",
+                "age_days",
                 "SERVICE",
                 "Status_Shipment",
-                "POD_Category",
-                "POD_DESC",
-                "WUS_REMARKS",
             ]
         ].rename(columns={"age_days": "Aging (Hari)"}),
         use_container_width=True,
     )
 
-  else:
-    st.subheader(
-        "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
+    csv_u = df_uninbound_show.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Download Data CSV UnInbound",
+        data=csv_u,
+        file_name="Data_UnInbound.csv",
+        mime="text/csv",
     )
-    st.info("Fitur UnInbound aktif.")
-
-except Exception as e:
-  st.error(f"Terjadi kesalahan saat memproses data: {e}")
+  else:
+    st.info("Tidak ada data UnInbound.")
