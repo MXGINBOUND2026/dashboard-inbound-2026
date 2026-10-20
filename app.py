@@ -160,10 +160,149 @@ except Exception as e:
   st.warning(f"Perhatian saat membaca file Excel pendukung: {e}")
 
 # =========================================================
-# RUNNING TEXT: LAST UPDATE AT (MAX TGL_TARIK_REPORT)
+# QUERY DATA UNRUNSHEET DASAR (UNTUK FILTER & RUNNING TEXT)
+# =========================================================
+base_unrunsheet_query = f"""
+    WITH filtered_raw AS (
+        SELECT *
+        FROM read_parquet('{LOCAL_PARQUET_PATH}')
+        WHERE (AWB_CANCEL IS NULL OR UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'Y')
+          AND NOT (
+              (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
+              OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
+          )
+    ),
+    parsed_dates AS (
+        SELECT 
+            *,
+            COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+            COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
+            COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+            COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+            COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
+            COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
+        FROM filtered_raw
+    ),
+    joined_locations AS (
+        SELECT 
+            p.*,
+            u_im.USER_ZONE_NAME AS IM_LOCATION,
+            u_mts.USER_ZONE_NAME AS MTS_LOCATION,
+            u_mti.USER_ZONE_NAME AS MTI_LOCATION,
+            CASE 
+                WHEN UPPER(COALESCE(p.TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN u_tm.USER_ZONE_NAME 
+                ELSE NULL 
+            END AS TM_LOCATION
+        FROM parsed_dates p
+        LEFT JOIN user_id_tbl u_im ON p.USER_IM = u_im.USER_ID
+        LEFT JOIN user_id_tbl u_mts ON p.MTS_USER = u_mts.USER_ID
+        LEFT JOIN user_id_tbl u_mti ON p.MTI_USER = u_mti.USER_ID
+        LEFT JOIN user_id_tbl u_tm ON p.TRANSIT_MANIFEST_USER = u_tm.USER_ID
+    ),
+    calculated AS (
+        SELECT 
+            j.*,
+            GREATEST(
+                CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
+                CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
+                CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
+                CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
+            ) AS valid_inbound_date
+        FROM joined_locations j
+        WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
+    ),
+    with_last_location AS (
+        SELECT 
+            c.*,
+            CASE 
+                WHEN valid_inbound_date IS NULL THEN NULL
+                WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
+                WHEN valid_inbound_date = dt_hvo THEN TRY_CAST(c.HVO_HUB_NAME AS VARCHAR)
+                WHEN valid_inbound_date = dt_hvi THEN TRY_CAST(c.HVO_HUB_DESTINATION_NAME AS VARCHAR)
+                WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
+                WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
+                WHEN valid_inbound_date = dt_tm  THEN TM_LOCATION
+                ELSE NULL
+            END AS LAST_LOCATION,
+            DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP) AS age_days
+        FROM calculated c
+        WHERE valid_inbound_date IS NOT NULL
+    )
+    SELECT 
+        COALESCE(w.AWB, '-') AS AWB,
+        COALESCE(w.SERVICE, '-') AS SERVICE,
+        COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
+        w.valid_inbound_date AS Last_Inbound,
+        COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
+        COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
+        COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
+        COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
+        w.age_days AS age_days,
+        CASE 
+            WHEN age_days <= 0 THEN 'H+0'
+            WHEN age_days = 1 THEN 'H+1'
+            WHEN age_days = 2 THEN 'H+2'
+            WHEN age_days = 3 THEN 'H+3'
+            WHEN age_days = 4 THEN 'H+4'
+            WHEN age_days = 5 THEN 'H+5'
+            WHEN age_days = 6 THEN 'H+6'
+            WHEN age_days = 7 THEN 'H+7'
+            ELSE '>H+7'
+        END AS aging_group
+    FROM with_last_location w
+    LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
+"""
+
+df_pivot_raw = conn.execute(base_unrunsheet_query).fetchdf()
+
+# =========================================================
+# SIDEBAR FILTERS (LAST LOCATION, CABANG, ZONA, KECAMATAN)
+# =========================================================
+st.sidebar.markdown("---")
+st.sidebar.header("🔍 Filter Data UnRunsheet")
+
+unique_locations = sorted(df_pivot_raw["LAST_LOCATION"].dropna().unique())
+unique_cabang = sorted(df_pivot_raw["Cabang"].dropna().unique())
+unique_zona = sorted(df_pivot_raw["Zona"].dropna().unique())
+unique_kecamatan = sorted(df_pivot_raw["Kecamatan"].dropna().unique())
+
+chosen_loc = st.sidebar.selectbox(
+    "🔍 Filter Last Location:", ["Semua Last Location"] + list(unique_locations)
+)
+chosen_cabang = st.sidebar.selectbox(
+    "🏢 Filter Cabang:", ["Semua Cabang"] + list(unique_cabang)
+)
+chosen_zona = st.sidebar.selectbox(
+    "⚡ Filter Zona (QCE):", ["Semua Zona"] + list(unique_zona)
+)
+chosen_kecamatan = st.sidebar.selectbox(
+    "📍 Filter Kecamatan:", ["Semua Kecamatan"] + list(unique_kecamatan)
+)
+
+filtered_pivot_df = df_pivot_raw.copy()
+if chosen_loc != "Semua Last Location":
+  filtered_pivot_df = filtered_pivot_df[
+      filtered_pivot_df["LAST_LOCATION"] == chosen_loc
+  ]
+if chosen_cabang != "Semua Cabang":
+  filtered_pivot_df = filtered_pivot_df[
+      filtered_pivot_df["Cabang"] == chosen_cabang
+  ]
+if chosen_zona != "Semua Zona":
+  filtered_pivot_df = filtered_pivot_df[
+      filtered_pivot_df["Zona"] == chosen_zona
+  ]
+if chosen_kecamatan != "Semua Kecamatan":
+  filtered_pivot_df = filtered_pivot_df[
+      filtered_pivot_df["Kecamatan"] == chosen_kecamatan
+  ]
+
+# =========================================================
+# RUNNING TEXT: LAST UPDATE AT & TOP 5 KECAMATAN UNRUNSHEET
 # =========================================================
 try:
-  # Mengambil nilai max TGL_TARIK_REPORT langsung menggunakan DuckDB untuk efisiensi
   max_date_df = conn.execute(f"""
         SELECT MAX(
             COALESCE(
@@ -176,22 +315,36 @@ try:
         FROM read_parquet('{LOCAL_PARQUET_PATH}')
     """).fetchdf()
 
-  max_date = (
-      max_date_df["max_dt"][0] if not max_date_df.empty else None
-  )
-
+  max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
   if pd.notnull(max_date):
-    # Format: dd mmm yyyy hh:mm (Contoh: 20 Oct 2026 14:30)
     formatted_date = pd.to_datetime(max_date).strftime("%d %b %Y %H:%M")
   else:
     formatted_date = "Waktu pembaruan tidak tersedia"
 except Exception:
   formatted_date = "Format tanggal tidak dikenali"
 
+# Hitung Top 5 Kecamatan UnRunsheet berdasarkan data yang terfilter
+top_kecamatan_df = (
+    filtered_pivot_df.groupby("Kecamatan")["AWB"]
+    .count()
+    .reset_index(name="total")
+    .sort_values(by="total", ascending=False)
+    .head(5)
+)
+
+top_kecamatan_str = " | ".join(
+    [
+        f"{idx+1}. {row.Kecamatan} ({row.total:,})"
+        for idx, row in top_kecamatan_df.iterrows()
+    ]
+)
+if not top_kecamatan_str:
+  top_kecamatan_str = "Tidak ada data"
+
 st.markdown(
     f"""
     <marquee style="color: #1f77b4; background-color: #f0f2f6; padding: 8px; border-radius: 5px; font-weight: 600; font-size: 14px;">
-        🔄 Last Update At: {formatted_date}
+        🔄 Last Update At: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏆 Top 5 Kecamatan UnRunsheet: {top_kecamatan_str}
     </marquee>
 """,
     unsafe_allow_html=True,
@@ -259,7 +412,6 @@ try:
         )
         SELECT 
             COUNT(DISTINCT AWB) AS total_awb,
-            -- UNINBOUND: JIKA LAST INBOUND KOSONG, TIDAK ADA RUNSHEET MXG, DAN TIDAK ADA RETURN RT/RF
             COUNT(
                 CASE 
                     WHEN last_inbound_date IS NULL 
@@ -467,192 +619,66 @@ try:
         " ➔ Zona ➔ Kecamatan)"
     )
 
-    pivot_query = f"""
-            WITH filtered_raw AS (
-                SELECT *
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE (AWB_CANCEL IS NULL OR UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'Y')
-                  AND NOT (
-                      (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-                      OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-                  )
-            ),
-            parsed_dates AS (
-                SELECT 
-                    *,
-                    COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
-                    COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
-                    COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
-                    COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
-                    COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
-                    COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
-                FROM filtered_raw
-            ),
-            joined_locations AS (
-                SELECT 
-                    p.*,
-                    u_im.USER_ZONE_NAME AS IM_LOCATION,
-                    u_mts.USER_ZONE_NAME AS MTS_LOCATION,
-                    u_mti.USER_ZONE_NAME AS MTI_LOCATION,
-                    CASE 
-                        WHEN UPPER(COALESCE(p.TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN u_tm.USER_ZONE_NAME 
-                        ELSE NULL 
-                    END AS TM_LOCATION
-                FROM parsed_dates p
-                LEFT JOIN user_id_tbl u_im ON p.USER_IM = u_im.USER_ID
-                LEFT JOIN user_id_tbl u_mts ON p.MTS_USER = u_mts.USER_ID
-                LEFT JOIN user_id_tbl u_mti ON p.MTI_USER = u_mti.USER_ID
-                LEFT JOIN user_id_tbl u_tm ON p.TRANSIT_MANIFEST_USER = u_tm.USER_ID
-            ),
-            calculated AS (
-                SELECT 
-                    j.*,
-                    GREATEST(
-                        CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
-                    ) AS valid_inbound_date
-                FROM joined_locations j
-                WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
-            ),
-            with_last_location AS (
-                SELECT 
-                    c.*,
-                    CASE 
-                        WHEN valid_inbound_date IS NULL THEN NULL
-                        WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
-                        WHEN valid_inbound_date = dt_hvo THEN TRY_CAST(c.HVO_HUB_NAME AS VARCHAR)
-                        WHEN valid_inbound_date = dt_hvi THEN TRY_CAST(c.HVO_HUB_DESTINATION_NAME AS VARCHAR)
-                        WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
-                        WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
-                        WHEN valid_inbound_date = dt_tm  THEN TM_LOCATION
-                        ELSE NULL
-                    END AS LAST_LOCATION,
-                    DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP) AS age_days
-                FROM calculated c
-                WHERE valid_inbound_date IS NOT NULL
-            )
-            SELECT 
-                COALESCE(w.AWB, '-') AS AWB,
-                COALESCE(w.SERVICE, '-') AS SERVICE,
-                COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
-                w.valid_inbound_date AS tanggal_max_inbound,
-                COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
-                COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
-                COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
-                COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
-                CASE 
-                    WHEN age_days <= 0 THEN 'H+0'
-                    WHEN age_days = 1 THEN 'H+1'
-                    WHEN age_days = 2 THEN 'H+2'
-                    WHEN age_days = 3 THEN 'H+3'
-                    WHEN age_days = 4 THEN 'H+4'
-                    WHEN age_days = 5 THEN 'H+5'
-                    WHEN age_days = 6 THEN 'H+6'
-                    WHEN age_days = 7 THEN 'H+7'
-                    ELSE '>H+7'
-                END AS aging_group
-            FROM with_last_location w
-            LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
-        """
+    df_pivot = pd.pivot_table(
+        filtered_pivot_df,
+        index=["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"],
+        columns="aging_group",
+        values="AWB",
+        aggfunc="count",
+        fill_value=0,
+    )
+    expected_cols = [
+        "H+0",
+        "H+1",
+        "H+2",
+        "H+3",
+        "H+4",
+        "H+5",
+        "H+6",
+        "H+7",
+        ">H+7",
+    ]
+    existing_cols = [c for c in expected_cols if c in df_pivot.columns]
+    df_pivot = df_pivot[existing_cols]
+    df_pivot["Grand Total"] = df_pivot.sum(axis=1)
 
-    df_pivot_raw = conn.execute(pivot_query).fetchdf()
+    st.dataframe(df_pivot, use_container_width=True)
 
-    if not df_pivot_raw.empty:
-      unique_locations = sorted(
-          df_pivot_raw["LAST_LOCATION"].dropna().unique()
-      )
-      unique_cabang = sorted(df_pivot_raw["Cabang"].dropna().unique())
-      unique_zona = sorted(df_pivot_raw["Zona"].dropna().unique())
-
-      f_col1, f_col2, f_col3 = st.columns(3)
-      with f_col1:
-        chosen_loc = st.selectbox(
-            "🔍 Filter Last Location:",
-            ["Semua Last Location"] + list(unique_locations),
-        )
-      with f_col2:
-        chosen_cabang = st.selectbox(
-            "🏢 Filter Cabang:", ["Semua Cabang"] + list(unique_cabang)
-        )
-      with f_col3:
-        chosen_zona = st.selectbox(
-            "⚡ Filter Zona (QCE):", ["Semua Zona"] + list(unique_zona)
-        )
-
-      filtered_pivot_df = df_pivot_raw.copy()
-      if chosen_loc != "Semua Last Location":
-        filtered_pivot_df = filtered_pivot_df[
-            filtered_pivot_df["LAST_LOCATION"] == chosen_loc
-        ]
-      if chosen_cabang != "Semua Cabang":
-        filtered_pivot_df = filtered_pivot_df[
-            filtered_pivot_df["Cabang"] == chosen_cabang
-        ]
-      if chosen_zona != "Semua Zona":
-        filtered_pivot_df = filtered_pivot_df[
-            filtered_pivot_df["Zona"] == chosen_zona
-        ]
-
-      df_pivot = pd.pivot_table(
-          filtered_pivot_df,
-          index=["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"],
-          columns="aging_group",
-          values="AWB",
-          aggfunc="count",
-          fill_value=0,
-      )
-      expected_cols = [
-          "H+0",
-          "H+1",
-          "H+2",
-          "H+3",
-          "H+4",
-          "H+5",
-          "H+6",
-          "H+7",
-          ">H+7",
+    st.subheader(
+        f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
+    )
+    df_detail_filtered = filtered_pivot_df.copy()
+    if selected_aging_group != "Semua Aging":
+      df_detail_filtered = df_detail_filtered[
+          df_detail_filtered["aging_group"] == selected_aging_group
       ]
-      existing_cols = [c for c in expected_cols if c in df_pivot.columns]
-      df_pivot = df_pivot[existing_cols]
-      df_pivot["Grand Total"] = df_pivot.sum(axis=1)
 
-      st.dataframe(df_pivot, use_container_width=True)
+    df_detail_filtered["Kategori_Unrunsheet"] = df_detail_filtered[
+        "WUS_REMARKS"
+    ].apply(
+        lambda x: (
+            "🚨 Unrunsheet AU"
+            if pd.notnull(x) and "HOC" in str(x).upper()
+            else "Unrunsheet Biasa"
+        )
+    )
 
-      st.subheader(
-          f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
-      )
-      df_detail_filtered = filtered_pivot_df.copy()
-      if selected_aging_group != "Semua Aging":
-        df_detail_filtered = df_detail_filtered[
-            df_detail_filtered["aging_group"] == selected_aging_group
-        ]
-
-      df_detail_filtered["Kategori_Unrunsheet"] = df_detail_filtered[
-          "WUS_REMARKS"
-      ].apply(
-          lambda x: (
-              "🚨 Unrunsheet AU"
-              if pd.notnull(x) and "HOC" in str(x).upper()
-              else "Unrunsheet Biasa"
-          )
-      )
-      st.dataframe(
-          df_detail_filtered[
-              [
-                  "AWB",
-                  "tanggal_max_inbound",
-                  "aging_group",
-                  "SERVICE",
-                  "Kategori_Unrunsheet",
-                  "WUS_REMARKS",
-              ]
-          ],
-          use_container_width=True,
-      )
+    # Menampilkan kolom sesuai permintaan (Last_Inbound, aging_seutuhnya/age_days, Last_Location, Kecamatan, dll)
+    st.dataframe(
+        df_detail_filtered[
+            [
+                "AWB",
+                "Last_Inbound",
+                "age_days",
+                "LAST_LOCATION",
+                "Kecamatan",
+                "SERVICE",
+                "Kategori_Unrunsheet",
+                "WUS_REMARKS",
+            ]
+        ].rename(columns={"age_days": "Aging (Hari)"}),
+        use_container_width=True,
+    )
 
   # =========================================================
   # VIEW 2: TABEL UNINBOUND (REVISI LOGIKA UTUH)
@@ -685,14 +711,12 @@ try:
             calculated_inbound AS (
                 SELECT 
                     p.*,
-                    -- MAX INBOUND DATE (LAST INBOUND)
                     GREATEST(
                         CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
                         CASE WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
                         CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END
                     ) AS last_inbound_date,
                     
-                    -- PARAMETER TANGGAL OUTBOUND VALID UNTUK HITUNG AGING UNINBOUND
                     CASE 
                         WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' AND dt_hvo IS NOT NULL 
                         THEN dt_hvo
