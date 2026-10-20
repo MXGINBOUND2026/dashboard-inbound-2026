@@ -99,7 +99,7 @@ def sync_all_files_from_gdrive():
 
 
 # =========================================================
-# SIDEBAR REFRESH & DOWNLOAD
+# SIDEBAR REFRESH & SINKRONISASI
 # =========================================================
 st.sidebar.header("⚙️ Pengaturan & Sinkronisasi GDrive")
 if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
@@ -116,11 +116,11 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.stop()
 
 # =========================================================
-# UTAMA: PROSES DATA DENGAN SAFE TRY-EXCEPT (AGAR TIDAK OH NO)
+# UTAMA: PROSES DATA SANGAT HEMAT RAM VIA DUCKDB VIEW
 # =========================================================
 try:
   conn = duckdb.connect()
-  conn.execute("PRAGMA memory_limit='1GB';")
+  conn.execute("PRAGMA memory_limit='512MB';")  # Batasi memory DuckDB
 
   # Load Syscode
   if os.path.exists(LOCAL_SYSCODE_PATH):
@@ -184,7 +184,7 @@ try:
       else ("DESCRIPTION" if "DESCRIPTION" in parquet_cols else "NULL")
   )
 
-  # Buat Temporary View di DuckDB agar cepat & hemat memori
+  # Buat Temporary View di DuckDB
   conn.execute(f"""
         CREATE OR REPLACE VIEW main_view AS 
         WITH raw AS (
@@ -265,12 +265,9 @@ try:
                     THEN 'UnRunsheet with PRA'
                     WHEN DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-' 
                     THEN 'UnRunsheet'
-                    
-                    -- STATUS UnRunsheet AU (HOC)
                     WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
                          AND UPPER(COALESCE(col_wus_out, '')) LIKE '%HOC%'
                     THEN 'UnRunsheet AU (HOC)'
-                    
                     WHEN DATE_RUNSHEET IS NOT NULL AND CAST(dt_run AS DATE) = CURRENT_DATE 
                          AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
                     THEN 'On Delivery Today'
@@ -326,51 +323,82 @@ try:
         LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
     """)
 
-  df_raw_all = conn.execute("SELECT * FROM main_view").fetchdf()
-
   # =========================================================
-  # SIDEBAR FILTERS (TERMASUK FILTER SHIPMENT STATUS)
+  # OPSI FILTER SIDEBAR (TARIK RINGAN DARI VIEW)
   # =========================================================
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
 
-  unique_locations = sorted(df_raw_all["LAST_LOCATION"].dropna().unique())
-  unique_cabang = sorted(df_raw_all["Cabang"].dropna().unique())
-  unique_zona = sorted(df_raw_all["Zona"].dropna().unique())
-  unique_kecamatan = sorted(df_raw_all["Kecamatan"].dropna().unique())
-  unique_status = sorted(df_raw_all["Status_Shipment"].dropna().unique())
+  unique_locations = [
+      r[0]
+      for r in conn.execute(
+          "SELECT DISTINCT LAST_LOCATION FROM main_view WHERE LAST_LOCATION IS"
+          " NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_cabang = [
+      r[0]
+      for r in conn.execute(
+          "SELECT DISTINCT Cabang FROM main_view WHERE Cabang IS NOT NULL ORDER"
+          " BY 1"
+      ).fetchall()
+  ]
+  unique_zona = [
+      r[0]
+      for r in conn.execute(
+          "SELECT DISTINCT Zona FROM main_view WHERE Zona IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_kecamatan = [
+      r[0]
+      for r in conn.execute(
+          "SELECT DISTINCT Kecamatan FROM main_view WHERE Kecamatan IS NOT NULL"
+          " ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_status = [
+      r[0]
+      for r in conn.execute(
+          "SELECT DISTINCT Status_Shipment FROM main_view WHERE Status_Shipment"
+          " IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
 
   chosen_loc = st.sidebar.selectbox(
-      "🔍 Filter Last Location:",
-      ["Semua Last Location"] + list(unique_locations),
+      "🔍 Filter Last Location:", ["Semua Last Location"] + unique_locations
   )
   chosen_cabang = st.sidebar.selectbox(
-      "🏢 Filter Cabang:", ["Semua Cabang"] + list(unique_cabang)
+      "🏢 Filter Cabang:", ["Semua Cabang"] + unique_cabang
   )
   chosen_zona = st.sidebar.selectbox(
-      "⚡ Filter Zona (QCE):", ["Semua Zona"] + list(unique_zona)
+      "⚡ Filter Zona (QCE):", ["Semua Zona"] + unique_zona
   )
   chosen_kecamatan = st.sidebar.selectbox(
-      "📍 Filter Kecamatan:", ["Semua Kecamatan"] + list(unique_kecamatan)
+      "📍 Filter Kecamatan:", ["Semua Kecamatan"] + unique_kecamatan
   )
   chosen_status = st.sidebar.selectbox(
-      "📦 Filter Shipment Status:", ["Semua Status"] + list(unique_status)
+      "📦 Filter Shipment Status:", ["Semua Status"] + unique_status
   )
 
-  filtered_df = df_raw_all.copy()
+  # SUSUN KONDISI SQL FILTER DARI SIDEBAR
+  where_clauses = []
   if chosen_loc != "Semua Last Location":
-    filtered_df = filtered_df[filtered_df["LAST_LOCATION"] == chosen_loc]
+    where_clauses.append(f"LAST_LOCATION = '{chosen_loc}'")
   if chosen_cabang != "Semua Cabang":
-    filtered_df = filtered_df[filtered_df["Cabang"] == chosen_cabang]
+    where_clauses.append(f"Cabang = '{chosen_cabang}'")
   if chosen_zona != "Semua Zona":
-    filtered_df = filtered_df[filtered_df["Zona"] == chosen_zona]
+    where_clauses.append(f"Zona = '{chosen_zona}'")
   if chosen_kecamatan != "Semua Kecamatan":
-    filtered_df = filtered_df[filtered_df["Kecamatan"] == chosen_kecamatan]
+    where_clauses.append(f"Kecamatan = '{chosen_kecamatan}'")
   if chosen_status != "Semua Status":
-    filtered_df = filtered_df[filtered_df["Status_Shipment"] == chosen_status]
+    where_clauses.append(f"Status_Shipment = '{chosen_status}'")
+
+  where_sql = (
+      "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
+  )
 
   # =========================================================
-  # RUNNING TEXT & DASHBOARD METRICS
+  # RUNNING TEXT & METRIK KARTU
   # =========================================================
   try:
     max_date_df = conn.execute(f"""
@@ -393,18 +421,14 @@ try:
   except Exception:
     formatted_date = "Format tanggal tidak dikenali"
 
-  top_kecamatan_df = (
-      filtered_df.groupby("Kecamatan")["AWB"]
-      .nunique()
-      .reset_index(name="total")
-      .sort_values(by="total", ascending=False)
-      .head(5)
-  )
+  top_kec_df = conn.execute(f"""
+        SELECT Kecamatan, COUNT(DISTINCT AWB) as total 
+        FROM main_view {where_sql} 
+        GROUP BY Kecamatan ORDER BY total DESC LIMIT 5
+    """).fetchdf()
+
   top_kecamatan_str = " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join(
-      [
-          f"{row.Kecamatan} ({row.total:,})"
-          for idx, row in top_kecamatan_df.iterrows()
-      ]
+      [f"{row.Kecamatan} ({row.total:,})" for idx, row in top_kec_df.iterrows()]
   )
   if not top_kecamatan_str:
     top_kecamatan_str = "Tidak ada data"
@@ -421,19 +445,20 @@ try:
   if "active_view" not in st.session_state:
     st.session_state.active_view = "UnRunsheet"
 
-  # METRIK KARTU TERHUBUNG KESELURUHAN FILTER SIDEBAR
-  total_awb = filtered_df["AWB"].nunique()
-  total_uninbound = filtered_df[filtered_df["Status_Shipment"] == "UnInbound"][
-      "AWB"
-  ].nunique()
-  total_unrunsheet = filtered_df[
-      filtered_df["Status_Shipment"].isin(
-          ["UnRunsheet", "UnRunsheet with PRA", "UnRunsheet AU (HOC)"]
-      )
-  ]["AWB"].nunique()
-  total_unrunsheet_au = filtered_df[
-      filtered_df["Status_Shipment"] == "UnRunsheet AU (HOC)"
-  ]["AWB"].nunique()
+  # HITUNG METRIK KARTU DENGAN QUERY HEMAT MEMORI
+  metrics_res = conn.execute(f"""
+        SELECT 
+            COUNT(DISTINCT AWB) AS total_awb,
+            COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnInbound' THEN AWB END) AS total_uninbound,
+            COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'UnRunsheet AU (HOC)') THEN AWB END) AS total_unrunsheet,
+            COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet AU (HOC)' THEN AWB END) AS total_unrunsheet_au
+        FROM main_view {where_sql}
+    """).fetchdf()
+
+  total_awb = metrics_res["total_awb"][0] or 0
+  total_uninbound = metrics_res["total_uninbound"][0] or 0
+  total_unrunsheet = metrics_res["total_unrunsheet"][0] or 0
+  total_unrunsheet_au = metrics_res["total_unrunsheet_au"][0] or 0
 
   c1, c2, c3, c4 = st.columns(4)
   with c1:
@@ -479,39 +504,17 @@ try:
         " TGL_RECEIVED ke Hari Ini)"
     )
 
-    df_unrun_only = filtered_df[
-        filtered_df["Status_Shipment"].isin(
-            ["UnRunsheet", "UnRunsheet with PRA", "UnRunsheet AU (HOC)"]
-        )
-    ]
-
-    if df_unrun_only.empty:
-      df_aging = pd.DataFrame(columns=["aging_group", "total_awb"])
-    else:
-      conn.register("filtered_awb_tbl", df_unrun_only[["AWB", "age_days"]])
-      aging_query = """
-                SELECT 
-                    CASE 
-                        WHEN age_days <= 0 THEN 'H+0'
-                        WHEN age_days = 1 THEN 'H+1'
-                        WHEN age_days = 2 THEN 'H+2'
-                        WHEN age_days = 3 THEN 'H+3'
-                        WHEN age_days = 4 THEN 'H+4'
-                        WHEN age_days = 5 THEN 'H+5'
-                        WHEN age_days = 6 THEN 'H+6'
-                        WHEN age_days = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END AS aging_group,
-                    COUNT(DISTINCT AWB) AS total_awb
-                FROM filtered_awb_tbl
-                GROUP BY 1
-                ORDER BY 
-                    CASE aging_group
-                        WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 
-                        WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8
-                    END
-            """
-      df_aging = conn.execute(aging_query).fetchdf()
+    df_aging = conn.execute(f"""
+            SELECT aging_group, COUNT(DISTINCT AWB) AS total_awb
+            FROM main_view 
+            {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'UnRunsheet AU (HOC)')
+            GROUP BY 1
+            ORDER BY 
+                CASE aging_group
+                    WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 
+                    WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8
+                END
+        """).fetchdf()
 
     selected_aging_group = "Semua Aging"
     col_chart, col_table = st.columns([2, 1])
@@ -569,117 +572,87 @@ try:
         "📊 Tabel Matrix Status Shipment (Status Shipment ➔ Aging Shipment)"
     )
 
-    if not filtered_df.empty:
-      df_status_pivot = pd.pivot_table(
-          filtered_df,
-          index="Status_Shipment",
-          columns="aging_group",
-          values="AWB",
-          aggfunc="nunique",
-          fill_value=0,
-      )
-      expected_cols = [
-          "H+0",
-          "H+1",
-          "H+2",
-          "H+3",
-          "H+4",
-          "H+5",
-          "H+6",
-          "H+7",
-          ">H+7",
-      ]
-      existing_cols = [c for c in expected_cols if c in df_status_pivot.columns]
-      df_status_pivot = df_status_pivot[existing_cols]
-      df_status_pivot["Grand Total"] = df_status_pivot.sum(axis=1)
+    pivot_matrix = conn.execute(f"""
+            PIVOT (
+                SELECT Status_Shipment, aging_group, AWB 
+                FROM main_view {where_sql}
+            )
+            ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+            USING COUNT(DISTINCT AWB)
+            GROUP BY Status_Shipment
+        """).fetchdf()
 
-      st.dataframe(df_status_pivot, use_container_width=True)
+    if not pivot_matrix.empty:
+      pivot_matrix = pivot_matrix.fillna(0)
+      numeric_cols = [c for c in pivot_matrix.columns if c != "Status_Shipment"]
+      pivot_matrix["Grand Total"] = pivot_matrix[numeric_cols].sum(axis=1)
+      st.dataframe(pivot_matrix, use_container_width=True)
     else:
       st.info("Tidak ada data untuk kombinasi filter yang dipilih.")
 
     st.markdown("---")
 
+    # TABEL PIVOT UNRUNSHEET BY LAST LOCATION
     st.subheader(
         "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang"
         " ➔ Zona ➔ Kecamatan)"
     )
 
-    if not df_unrun_only.empty:
-      df_pivot = pd.pivot_table(
-          df_unrun_only,
-          index=["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"],
-          columns="aging_group",
-          values="AWB",
-          aggfunc="nunique",
-          fill_value=0,
-      )
-      expected_cols = [
-          "H+0",
-          "H+1",
-          "H+2",
-          "H+3",
-          "H+4",
-          "H+5",
-          "H+6",
-          "H+7",
-          ">H+7",
+    pivot_loc = conn.execute(f"""
+            PIVOT (
+                SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
+                FROM main_view 
+                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'UnRunsheet AU (HOC)')
+            )
+            ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+            USING COUNT(DISTINCT AWB)
+            GROUP BY LAST_LOCATION, Cabang, Zona, Kecamatan
+        """).fetchdf()
+
+    if not pivot_loc.empty:
+      pivot_loc = pivot_loc.fillna(0)
+      num_cols = [
+          c
+          for c in pivot_loc.columns
+          if c not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
       ]
-      df_pivot = df_pivot[[c for c in expected_cols if c in df_pivot.columns]]
-      df_pivot["Grand Total"] = df_pivot.sum(axis=1)
-      st.dataframe(df_pivot, use_container_width=True)
+      pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
+      st.dataframe(pivot_loc, use_container_width=True)
     else:
       st.info("Tidak ada data Unrunsheet.")
 
+    # TABEL DETAIL AWB (DIBATASI TOP 1,000 AGAR RINGAN)
     st.subheader(
         f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
     )
-    df_detail_filtered = df_unrun_only.copy()
-    if selected_aging_group != "Semua Aging":
-      df_detail_filtered = df_detail_filtered[
-          df_detail_filtered["aging_group"] == selected_aging_group
-      ]
 
-    st.dataframe(
-        df_detail_filtered[
-            [
-                "AWB",
-                "Last_Inbound",
-                "age_days",
-                "LAST_LOCATION",
-                "Kecamatan",
-                "SERVICE",
-                "Status_Shipment",
-                "POD_Category",
-                "POD_DESC",
-                "WUS_REMARKS",
-            ]
-        ].rename(columns={"age_days": "Aging (Hari)"}),
-        use_container_width=True,
+    aging_clause = (
+        f"AND aging_group = '{selected_aging_group}'"
+        if selected_aging_group != "Semua Aging"
+        else ""
     )
+    df_detail = conn.execute(f"""
+            SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, POD_Category, POD_DESC, WUS_REMARKS
+            FROM main_view
+            {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'UnRunsheet AU (HOC)') {aging_clause}
+            LIMIT 1000
+        """).fetchdf()
+
+    st.dataframe(df_detail, use_container_width=True)
 
   else:
     st.subheader(
         "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
     )
-    df_uninbound_show = filtered_df[
-        filtered_df["Status_Shipment"] == "UnInbound"
-    ]
+    df_uninbound_show = conn.execute(f"""
+            SELECT AWB, Cabang, Zona, Kecamatan, age_days AS "Aging (Hari)", SERVICE, Status_Shipment
+            FROM main_view
+            {where_sql} AND Status_Shipment = 'UnInbound'
+            LIMIT 1000
+        """).fetchdf()
 
     if not df_uninbound_show.empty:
-      st.dataframe(
-          df_uninbound_show[
-              [
-                  "AWB",
-                  "Cabang",
-                  "Zona",
-                  "Kecamatan",
-                  "age_days",
-                  "SERVICE",
-                  "Status_Shipment",
-              ]
-          ].rename(columns={"age_days": "Aging (Hari)"}),
-          use_container_width=True,
-      )
+      st.dataframe(df_uninbound_show, use_container_width=True)
 
       csv_u = df_uninbound_show.to_csv(index=False).encode("utf-8")
       st.download_button(
