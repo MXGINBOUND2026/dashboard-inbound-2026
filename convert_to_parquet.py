@@ -13,9 +13,7 @@ from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 # KONFIGURASI
 # =========================================================
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
-SUPPORTING_GDRIVE_FOLDER_ID = (
-    "1EsUiz1Egqzlbk0gpaohr7lZBcR5rqB2Y"  # Folder DATA FILTER
-)
+SUPPORTING_GDRIVE_FOLDER_ID = "1EsUiz1Egqzlbk0gpaohr7lZBcR5rqB2Y"
 
 TEMP_CSV_DIR = "temp_csv_files"
 OUTPUT_PARQUET = "data_inbound_2026.parquet"
@@ -38,9 +36,8 @@ def get_drive_service():
     )
 
   if "private_key" in creds_dict:
-    pk = str(creds_dict["private_key"])
-    pk = pk.replace("\\n", "\n")
-    creds_dict["private_key"] = pk.strip()
+    pk = str(creds_dict["private_key"]).replace("\\n", "\n").strip()
+    creds_dict["private_key"] = pk
 
   creds = service_account.Credentials.from_service_account_info(
       creds_dict, scopes=SCOPES
@@ -86,7 +83,7 @@ def download_gdrive_folder(service, folder_id, local_path):
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done:
-          status, done = downloader.next_chunk()
+          _, done = downloader.next_chunk()
 
         with open(local_item_path, "wb") as f:
           f.write(fh.getvalue())
@@ -112,7 +109,7 @@ def download_specific_file(service, folder_id, file_name, local_path):
     downloader = MediaIoBaseDownload(fh, request)
     done = False
     while not done:
-      status, done = downloader.next_chunk()
+      _, done = downloader.next_chunk()
     with open(local_path, "wb") as f:
       f.write(fh.getvalue())
     return True
@@ -150,19 +147,54 @@ else:
   df_coding = pd.DataFrame(columns=["CODE", "POD_Category", "POD_DESC"])
 
 print(
-    "\n4. Mengonversi CSV, melakukan LEFT JOIN Coding, dan memproses kolom"
-    " logika via DuckDB..."
+    "\n4. Mengonversi CSV, membuang kolom tak penting, melakukan LEFT JOIN,"
+    " dan menyimpan ke Parquet..."
 )
 con = duckdb.connect()
 con.execute("PRAGMA memory_limit='3GB';")
 con.register("df_coding_ref", df_coding)
 csv_pattern = os.path.join(TEMP_CSV_DIR, "**", "*.csv")
 
+# Menyaring hanya kolom-kolom inti yang dibutuhkan untuk dashboard
 query_duckdb = f"""
     COPY (
         WITH raw_joined AS (
             SELECT 
-                main.*,
+                main.AWB,
+                main.SERVICE,
+                main.DEST,
+                main.CODING,
+                main.WUS_REMARKS,
+                main.WUS_OUTGOING_CODE,
+                main.STATUS_POD,
+                main.RUNSHEET_NO,
+                main.PRA_RUNSHEET_NO,
+                main.DATE_RUNSHEET,
+                main.AWB_CANCEL,
+                main.CONNOTE_RETURN_RT,
+                main.CONNOTE_RETURN_RF,
+                main.INBOUND_MANIFEST,
+                main.INBOUND_MANIFEST_DATE,
+                main.USER_IM,
+                main.HVO_NO,
+                main.HVO_DATE,
+                main.HVO_HUB_NAME,
+                main.HVI_NO,
+                main.HVI_DATE,
+                main.HVO_HUB_DESTINATION_NAME,
+                main.MANIFEST_INBOUND_SUBAGEN_NO,
+                main.MANIFEST_INBOUND_SUBAGEN_DATE,
+                main.MTI_USER,
+                main.MANIFEST_TRANSIT_SUBAGEN_NO,
+                main.MANIFEST_TRANSIT_SUBAGEN_DATE,
+                main.MTS_USER,
+                main.TRANSIT_MANIFEST,
+                main.TRANSIT_MANIFEST_DATE,
+                main.TRANSIT_MANIFEST_USER,
+                main.RECEIVING_DATE,
+                main.OUTBOUND_MANIFEST_DATE,
+                main.TGL_RECEIVED,
+                main.TGL_TARIK_REPORT,
                 ref.POD_Category,
                 ref.POD_DESC
             FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
