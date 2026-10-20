@@ -338,17 +338,24 @@ try:
           ]
           st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
 
+    # Buat klausul filter tambahan berdasarkan aging yang dipilih di tabel
+    aging_clause = (
+        f"AND aging_group = '{selected_aging_group}'"
+        if selected_aging_group != "Semua Aging"
+        else ""
+    )
+
     st.markdown("---")
 
-    # Tabel Matrix Status Shipment
+    # Tabel Matrix Status Shipment (Ikut terfilter aging jika dipilih)
     st.subheader(
-        "📊 Tabel Matrix Status Shipment (Status Shipment ➔ Aging Shipment)"
+        f"📊 Tabel Matrix Status Shipment (Filter Aging: [{selected_aging_group}])"
     )
 
     pivot_matrix = conn.execute(f"""
             PIVOT (
                 SELECT Status_Shipment, aging_group, AWB 
-                FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
+                FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql} {aging_clause}
             )
             ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
             USING COUNT(DISTINCT AWB)
@@ -365,16 +372,16 @@ try:
 
     st.markdown("---")
 
-    # Tabel Pivot Unrunsheet
+    # Tabel Pivot Unrunsheet (Ikut terfilter aging jika dipilih)
     st.subheader(
-        "🗂️ Unrunsheet By Last Location"
+        f"🗂️ Unrunsheet By Last Location (Filter Aging: [{selected_aging_group}])"
     )
 
     pivot_loc = conn.execute(f"""
             PIVOT (
                 SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)')
+                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)') {aging_clause}
             )
             ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
             USING COUNT(DISTINCT AWB)
@@ -398,11 +405,6 @@ try:
         f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
     )
 
-    aging_clause = (
-        f"AND aging_group = '{selected_aging_group}'"
-        if selected_aging_group != "Semua Aging"
-        else ""
-    )
     df_detail = conn.execute(f"""
             SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, POD_Category, POD_DESC, WUS_REMARKS
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
