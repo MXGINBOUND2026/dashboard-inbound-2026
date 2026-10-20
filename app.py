@@ -95,7 +95,7 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.stop()
 
 # =========================================================
-# UTAMA: BACA DATA PARQUET SIAP SAJI VIA DUCKDB
+# UTAMA: BACA DATA PARQUET VIA DUCKDB
 # =========================================================
 try:
   conn = duckdb.connect()
@@ -367,8 +367,7 @@ try:
 
     # Tabel Pivot Unrunsheet
     st.subheader(
-        "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang"
-        " ➔ Zona ➔ Kecamatan)"
+        "🗂️ Unrunsheet By Last Location"
     )
 
     pivot_loc = conn.execute(f"""
