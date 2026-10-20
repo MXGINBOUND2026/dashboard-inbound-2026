@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import duckdb
+import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -96,7 +97,7 @@ def download_gdrive_folder(service, folder_id, local_path):
 
 
 # =========================================================
-# 1. PROSES UTAMA
+# 1. PROSES UTAMA & MENGUNDUH DATA DARI GOOGLE DRIVE
 # =========================================================
 print("1. Menghubungkan ke Google Drive API...")
 service = get_drive_service()
@@ -104,32 +105,82 @@ service = get_drive_service()
 if os.path.exists(TEMP_CSV_DIR):
   shutil.rmtree(TEMP_CSV_DIR)
 
-print("2. Mengunduh seluruh file CSV dari Google Drive...")
+print("2. Mengunduh seluruh file (CSV & Folder Filter) dari Google Drive...")
 download_gdrive_folder(service, TARGET_GDRIVE_FOLDER_ID, TEMP_CSV_DIR)
 
-print("\n3. Mengonversi CSV ke Parquet dengan Optimasi Memori DuckDB...")
+# =========================================================
+# 2. MEMBACA FILE PENDUKUNG CODING.XLSX
+# =========================================================
+print("\n3. Membaca file pendukung Coding.xlsx...")
+coding_file_path = None
+
+# Mencari file Coding.xlsx secara rekursif di dalam folder hasil unduhan
+for root, dirs, files in os.walk(TEMP_CSV_DIR):
+  for f in files:
+    if f.lower() == "coding.xlsx":
+      coding_file_path = os.path.join(root, f)
+      break
+
+if coding_file_path and os.path.exists(coding_file_path):
+  print(f"File Coding.xlsx ditemukan di: {coding_file_path}")
+  df_coding = pd.read_excel(coding_file_path)
+
+  # Bersihkan spasi pada nama kolom dan ambil kolom referensi
+  df_coding.columns = df_coding.columns.str.strip()
+  df_coding = df_coding[["CODE", "CATEGORY", "DESCRIPTION"]].drop_duplicates(
+      subset=["CODE"]
+  )
+  # Ubah nama kolom sesuai permintaan
+  df_coding.rename(
+      columns={"CATEGORY": "Categori POD", "DESCRIPTION": "Desc POD"},
+      inplace=True,
+  )
+else:
+  print("⚠️ Warning: File Coding.xlsx tidak ditemukan. Membuat referensi kosong.")
+  df_coding = pd.DataFrame(columns=["CODE", "Categori POD", "Desc POD"])
+
+# =========================================================
+# 3. MENGONVERSI CSV & JOIN DENGAN DUCKDB
+# =========================================================
+print(
+    "\n4. Mengonversi CSV dan melakukan LEFT JOIN dengan referensi POD via"
+    " DuckDB..."
+)
 con = duckdb.connect()
 con.execute("PRAGMA memory_limit='3GB';")
 
+# Daftarkan DataFrame referensi Coding ke dalam DuckDB
+con.register("df_coding_ref", df_coding)
+
 csv_pattern = os.path.join(TEMP_CSV_DIR, "**", "*.csv")
 
-con.execute(f"""
+query_duckdb = f"""
     COPY (
-        SELECT * FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true)
+        SELECT 
+            main.*,
+            ref."Categori POD",
+            ref."Desc POD"
+        FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
+        LEFT JOIN df_coding_ref AS ref
+            ON CAST(main.CODING AS VARCHAR) = CAST(ref.CODE AS VARCHAR)
     ) TO '{OUTPUT_PARQUET}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
-""")
+"""
 
-print(f"✅ Selesai! File Parquet lokal berhasil dibuat: {OUTPUT_PARQUET}")
+con.execute(query_duckdb)
+print(
+    f"✅ Selesai! File Parquet dengan kolom tambahan 'Categori POD' dan"
+    f" 'Desc POD' berhasil dibuat: {OUTPUT_PARQUET}"
+)
 
-# Membersihkan folder CSV sementara di lokal
+# Membersihkan folder sementara di lokal
 shutil.rmtree(TEMP_CSV_DIR)
-print("Folder CSV sementara di lokal telah dibersihkan.")
+print("Folder sementara di lokal telah dibersihkan.")
 
 # =========================================================
 # 4. UPLOAD / UPDATE PARQUET KEMBALI KE GOOGLE DRIVE
 # =========================================================
 print(
-    "\n4. Memperbarui (Update) file Parquet yang sudah ada di Google Drive..."
+    "\n5. Memperbarui (Update) file Parquet yang sudah ada di Google Drive..."
 )
 media = MediaFileUpload(
     OUTPUT_PARQUET, mimetype="application/octet-stream", resumable=True
@@ -140,17 +191,15 @@ results = service.files().list(q=query, fields="files(id, name)").execute()
 items = results.get("files", [])
 
 if items:
-  # Jika file sudah ada, timpa (update) isinya tanpa menghapus ID-nya
+  # Jika file sudah ada, timpa (update) isinya tanpa mengubah ID
   file_id = items[0]["id"]
   print(f"Menimpa isi file lama (ID: {file_id})...")
   updated_file = (
-      service.files()
-      .update(fileId=file_id, media_body=media)
-      .execute()
+      service.files().update(fileId=file_id, media_body=media).execute()
   )
   print("🎉 SUKSES! File Parquet berhasil diperbarui di Google Drive!")
 else:
-  # Jika file belum pernah ada sama sekali, buat baru
+  # Jika file belum ada sama sekali, buat baru
   print("File Parquet belum ada, membuat file baru...")
   file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
   uploaded_file = (
