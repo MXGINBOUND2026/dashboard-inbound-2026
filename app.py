@@ -323,7 +323,7 @@ try:
 except Exception:
   formatted_date = "Format tanggal tidak dikenali"
 
-# Hitung Top 5 Kecamatan UnRunsheet berdasarkan data yang terfilter
+# Hitung Top 5 Kecamatan UnRunsheet berdasarkan data yang terfilter sidebar
 top_kecamatan_df = (
     filtered_pivot_df.groupby("Kecamatan")["AWB"]
     .count()
@@ -332,7 +332,6 @@ top_kecamatan_df = (
     .head(5)
 )
 
-# Menghapus nomor urut dan memberikan spasi antar kecamatan menggunakan separator yang jelas
 top_kecamatan_str = " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join(
     [
         f"{row.Kecamatan} ({row.total:,})"
@@ -391,14 +390,12 @@ try:
                 CONNOTE_RETURN_RT,
                 CONNOTE_RETURN_RF,
                 
-                -- LOGIKA LAST INBOUND (MAX INBOUND DATE)
                 GREATEST(
                     CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
                     CASE WHEN UPPER(SERVICE) LIKE '%CTC%' AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END
                 ) AS last_inbound_date,
                 
-                -- LOGIKA UNRUNSHEET
                 CASE 
                     WHEN (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
                          AND UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HOC%'
@@ -485,51 +482,12 @@ try:
         " Hari Ini)"
     )
 
-    aging_query = f"""
-            WITH filtered_raw AS (
-                SELECT *
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE (AWB_CANCEL IS NULL OR UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'Y')
-                  AND NOT (
-                      (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-')
-                      OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-                  )
-            ),
-            parsed_dates AS (
-                SELECT 
-                    *,
-                    COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
-                    COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
-                    COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
-                    COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
-                    COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
-                    COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm
-                FROM filtered_raw
-            ),
-            processed_data AS (
-                SELECT 
-                    AWB,
-                    RUNSHEET_NO,
-                    GREATEST(
-                        CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
-                        CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
-                    ) AS valid_inbound_date
-                FROM parsed_dates
-            ),
-            unrunsheet_aging AS (
-                SELECT 
-                    AWB,
-                    valid_inbound_date,
-                    DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP) AS age_days
-                FROM processed_data
-                WHERE (RUNSHEET_NO IS NULL OR TRIM(CAST(RUNSHEET_NO AS VARCHAR)) == '' OR RUNSHEET_NO = '-')
-                  AND valid_inbound_date IS NOT NULL
-            ),
-            grouped_aging AS (
+    # --- AGING QUERY YANG TERHUBUNG DENGAN FILTER SIDEBAR ---
+    if filtered_pivot_df.empty:
+      df_aging = pd.DataFrame(columns=["aging_group", "total_awb"])
+    else:
+      conn.register("filtered_awb_tbl", filtered_pivot_df[["AWB", "age_days"]])
+      aging_query = """
                 SELECT 
                     CASE 
                         WHEN age_days <= 0 THEN 'H+0'
@@ -543,26 +501,23 @@ try:
                         ELSE '>H+7'
                     END AS aging_group,
                     COUNT(DISTINCT AWB) AS total_awb
-                FROM unrunsheet_aging
+                FROM filtered_awb_tbl
                 GROUP BY 1
-            )
-            SELECT aging_group, total_awb
-            FROM grouped_aging
-            ORDER BY 
-                CASE aging_group
-                    WHEN 'H+0' THEN 0
-                    WHEN 'H+1' THEN 1
-                    WHEN 'H+2' THEN 2
-                    WHEN 'H+3' THEN 3
-                    WHEN 'H+4' THEN 4
-                    WHEN 'H+5' THEN 5
-                    WHEN 'H+6' THEN 6
-                    WHEN 'H+7' THEN 7
-                    WHEN '>H+7' THEN 8
-                END
-        """
+                ORDER BY 
+                    CASE aging_group
+                        WHEN 'H+0' THEN 0
+                        WHEN 'H+1' THEN 1
+                        WHEN 'H+2' THEN 2
+                        WHEN 'H+3' THEN 3
+                        WHEN 'H+4' THEN 4
+                        WHEN 'H+5' THEN 5
+                        WHEN 'H+6' THEN 6
+                        WHEN 'H+7' THEN 7
+                        WHEN '>H+7' THEN 8
+                    END
+            """
+      df_aging = conn.execute(aging_query).fetchdf()
 
-    df_aging = conn.execute(aging_query).fetchdf()
     selected_aging_group = "Semua Aging"
 
     col_chart, col_table = st.columns([2, 1])
@@ -597,20 +552,23 @@ try:
             height=380,
         )
         st.plotly_chart(fig, use_container_width=True)
+      else:
+        st.info("Tidak ada data untuk filter yang dipilih.")
 
     with col_table:
       st.markdown("**Klik / Pilih Baris Tabel di Bawah:**")
-      event = st.dataframe(
-          df_aging,
-          use_container_width=True,
-          on_select="rerun",
-          selection_mode="single-row",
-      )
-      selected_rows = event.selection.get("rows", [])
-      if selected_rows:
-        selected_index = selected_rows[0]
-        selected_aging_group = df_aging.iloc[selected_index]["aging_group"]
-        st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
+      if not df_aging.empty:
+        event = st.dataframe(
+            df_aging,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row",
+        )
+        selected_rows = event.selection.get("rows", [])
+        if selected_rows:
+          selected_index = selected_rows[0]
+          selected_aging_group = df_aging.iloc[selected_index]["aging_group"]
+          st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
 
     st.markdown("---")
 
@@ -664,7 +622,6 @@ try:
         )
     )
 
-    # Menampilkan kolom sesuai permintaan (Last_Inbound, aging_seutuhnya/age_days, Last_Location, Kecamatan, dll)
     st.dataframe(
         df_detail_filtered[
             [
