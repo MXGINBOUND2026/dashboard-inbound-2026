@@ -332,9 +332,10 @@ top_kecamatan_df = (
     .head(5)
 )
 
-top_kecamatan_str = " | ".join(
+# Menghapus nomor urut dan memberikan spasi antar kecamatan menggunakan separator yang jelas
+top_kecamatan_str = " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join(
     [
-        f"{idx+1}. {row.Kecamatan} ({row.total:,})"
+        f"{row.Kecamatan} ({row.total:,})"
         for idx, row in top_kecamatan_df.iterrows()
     ]
 )
@@ -349,7 +350,6 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-
 st.success(
     "⚡ File Parquet dan Data Pendukung dimuat secara instan menggunakan"
     " DuckDB!"
