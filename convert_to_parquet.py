@@ -232,7 +232,7 @@ query_duckdb = f"""
                 COALESCE(TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)) AS dt_run,
                 COALESCE(TRY_STRPTIME(TGL_RECEIVED, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_RECEIVED AS TIMESTAMP)) AS dt_tgl_rec,
                 
-                -- PENERAPAN LOGIKA CUSTOMER REQUEST MENJADI RETURN
+                -- ATURAN KATEGORI RETURN JIKA CUSTOMER REQUEST + ADA CONNOTE RETURN
                 CASE 
                     WHEN UPPER(TRIM(COALESCE(raw_pod_category, ''))) = 'CUSTOMER REQUEST' 
                          AND (
@@ -285,9 +285,9 @@ query_duckdb = f"""
                     ELSE NULL
                 END AS LAST_LOCATION,
                 
-                -- LOGIKA STATUS SHIPMENT
+                -- HIRARKI STATUS SHIPMENT
                 CASE 
-                    WHEN AWB_CANCEL IS NULL OR TRIM(CAST(AWB_CANCEL AS VARCHAR)) = '' OR UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'N' THEN 'AWB Cancel'
+                    WHEN UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'Y' THEN 'AWB Cancel'
                     WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
                     
                     WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
@@ -338,7 +338,7 @@ query_duckdb = f"""
                     ELSE COALESCE(POD_Category, 'UNKNOWN')
                 END AS Status_Shipment,
 
-                -- AGING SHIPMENT KHUSUS SUCCESS DELIVERY & SUCCESS RETURN SHIPPER
+                -- AGING SHIPMENT (SUCCESS DELIVERY & SUCCESS RETURN SHIPPER KE TGL_RECEIVED, LAINNYA KE HARI INI)
                 CASE 
                     WHEN UPPER(TRIM(COALESCE(POD_Category, ''))) IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND dt_tgl_rec IS NOT NULL 
                     THEN DATEDIFF('day', valid_inbound_date, dt_tgl_rec)
@@ -373,11 +373,12 @@ query_duckdb = f"""
             w.TGL_TARIK_REPORT
         FROM processed w
         LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
+        WHERE w.Status_Shipment != 'AWB Cancel'
     ) TO '{OUTPUT_PARQUET}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
 """
 
 con.execute(query_duckdb)
-print(f"✅ Selesai! File Parquet dengan aturan baru berhasil dibuat: {OUTPUT_PARQUET}")
+print(f"✅ Selesai! File Parquet berhasil dibuat: {OUTPUT_PARQUET}")
 shutil.rmtree(TEMP_CSV_DIR)
 
 print("\n5. Memperbarui file Parquet di Google Drive...")
