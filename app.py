@@ -350,6 +350,7 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
 st.success(
     "⚡ File Parquet dan Data Pendukung dimuat secara instan menggunakan"
     " DuckDB!"
