@@ -285,20 +285,25 @@ query_duckdb = f"""
                     ELSE NULL
                 END AS LAST_LOCATION,
                 
-                -- HIRARKI STATUS SHIPMENT
+                -- HIRARKI STATUS SHIPMENT TERBARU
                 CASE 
                     -- 1. AWB Cancel: Jika AWB_CANCEL bernilai Y
                     WHEN UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'Y' THEN 'AWB Cancel'
                     
-                    -- 2. Jika POD_Category sudah ada isinya (Success, Breach, Claim, Close By System, dll.)
+                    -- 2. Jika POD_Category sudah ada isinya (Success, Breach, Claim, Close By System, Return, dll.)
                     WHEN POD_Category IS NOT NULL AND TRIM(CAST(POD_Category AS VARCHAR)) != '' AND POD_Category != '-' THEN POD_Category
                     
                     -- 3. UnReceiving
                     WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
                     
-                    -- 4. UnOutbound (Pengecualian Service CTC)
+                    -- 4. UnOutbound (Dengan pengecualian Service CTC & HVO)
                     WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
-                         AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVO_DATE IS NULL AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' AND OUTBOUND_MANIFEST_DATE IS NOT NULL) 
+                         AND NOT (
+                             UPPER(SERVICE) LIKE '%CTC%' 
+                             AND HVO_DATE IS NULL 
+                             AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' 
+                             AND OUTBOUND_MANIFEST_DATE IS NOT NULL
+                         ) 
                     THEN 'UnOutbound'
                     
                     -- 5. UnInbound (Last_Inbound KOSONG, KECUALI jika SERVICE CTC dan DATE_RUNSHEET ADA ISI)
