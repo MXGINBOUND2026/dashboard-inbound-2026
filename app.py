@@ -116,16 +116,39 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.stop()
 
 conn = duckdb.connect()
+
+# Pembacaan File Excel Pendukung dengan Aman (Safe Fallback)
 try:
   if os.path.exists(LOCAL_SYSCODE_PATH):
-    conn.register("syscode_tbl", pd.read_excel(LOCAL_SYSCODE_PATH))
+    try:
+      df_syscode = pd.read_excel(LOCAL_SYSCODE_PATH, engine="openpyxl")
+      conn.register("syscode_tbl", df_syscode)
+    except Exception:
+      conn.register(
+          "syscode_tbl",
+          pd.DataFrame(
+              columns=[
+                  "SYSCODE",
+                  "KABUPATEN",
+                  "ZONA DELEVERY (QCE)",
+                  "KECAMATAN",
+              ]
+          ),
+      )
+
   if os.path.exists(LOCAL_USER_ID_PATH):
-    conn.register("user_id_tbl", pd.read_excel(LOCAL_USER_ID_PATH))
+    try:
+      df_user_id = pd.read_excel(LOCAL_USER_ID_PATH, engine="openpyxl")
+      conn.register("user_id_tbl", df_user_id)
+    except Exception:
+      conn.register(
+          "user_id_tbl", pd.DataFrame(columns=["USER_ID", "USER_ZONE_NAME"])
+      )
 except Exception as e:
   st.warning(f"Perhatian saat membaca file Excel pendukung: {e}")
 
 # =========================================================
-# QUERY DATA UTAMA DENGAN LOGIKA KOLOM BARU
+# QUERY DATA UTAMA DENGAN LOGIKA STATUS & AGING SHIPMENT
 # =========================================================
 base_unrunsheet_query = f"""
     WITH filtered_raw AS (
@@ -446,17 +469,25 @@ try:
     st.metric(label="📦 Total Unique AWB", value=f"{total_awb:,}")
   with c2:
     st.metric(label="⚠️ Total UnInbound", value=f"{total_uninbound:,}")
-    if st.button("👉 Lihat Data UnInbound", key="btn_uninbound", use_container_width=True):
+    if st.button(
+        "👉 Lihat Data UnInbound", key="btn_uninbound", use_container_width=True
+    ):
       st.session_state.active_view = "UnInbound"
       st.rerun()
   with c3:
     st.metric(label="🚨 Alert: Total UnRunsheet", value=f"{total_unrunsheet:,}")
-    if st.button("👉 Lihat Data UnRunsheet", key="btn_unrunsheet", use_container_width=True):
+    if st.button(
+        "👉 Lihat Data UnRunsheet",
+        key="btn_unrunsheet",
+        use_container_width=True,
+    ):
       st.session_state.active_view = "UnRunsheet"
       st.rerun()
   with c4:
     st.metric(label="🚚 Unrunsheet AU (HOC)", value=f"{total_unrunsheet_au:,}")
-    if st.button("👉 Lihat UnRunsheet AU", key="btn_unrunsheet_au", use_container_width=True):
+    if st.button(
+        "👉 Lihat UnRunsheet AU", key="btn_unrunsheet_au", use_container_width=True
+    ):
       st.session_state.active_view = "UnRunsheet AU"
       st.rerun()
 
@@ -471,7 +502,8 @@ try:
 
   if view_choice == "📊 Analisis UnRunsheet":
     st.subheader(
-        "📊 Distribusi Usia Data UnRunsheet (Aging from Last_Inbound)"
+        "📊 Distribusi Usia Data UnRunsheet (Aging dari Max Inbound /"
+        " TGL_RECEIVED ke Hari Ini)"
     )
 
     if filtered_pivot_df.empty:
@@ -525,7 +557,11 @@ try:
             plot_bgcolor="rgba(40, 40, 40, 0.8)",
             paper_bgcolor="rgba(0, 0, 0, 0)",
             font=dict(color="#CCCCCC", size=13),
-            xaxis=dict(type="category", tickangle=0, gridcolor="rgba(255, 255, 255, 0.05)"),
+            xaxis=dict(
+                type="category",
+                tickangle=0,
+                gridcolor="rgba(255, 255, 255, 0.05)",
+            ),
             yaxis=dict(gridcolor="rgba(255, 255, 255, 0.08)"),
             margin=dict(l=20, r=20, t=30, b=20),
             height=380,
@@ -536,15 +572,21 @@ try:
       st.markdown("**Klik / Pilih Baris Tabel di Bawah:**")
       if not df_aging.empty:
         event = st.dataframe(
-            df_aging, use_container_width=True, on_select="rerun", selection_mode="single-row"
+            df_aging,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row",
         )
         if event.selection.get("rows", []):
-          selected_aging_group = df_aging.iloc[event.selection["rows"][0]]["aging_group"]
+          selected_aging_group = df_aging.iloc[event.selection["rows"][0]][
+              "aging_group"
+          ]
           st.success(f"🎯 Filter Aktif: **{selected_aging_group}**")
 
     st.markdown("---")
     st.subheader(
-        "🗂️ Unrunsheet By Last Location"
+        "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang"
+        " ➔ Zona ➔ Kecamatan)"
     )
 
     df_pivot = pd.pivot_table(
@@ -555,12 +597,24 @@ try:
         aggfunc="count",
         fill_value=0,
     )
-    expected_cols = ["H+0", "H+1", "H+2", "H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]
+    expected_cols = [
+        "H+0",
+        "H+1",
+        "H+2",
+        "H+3",
+        "H+4",
+        "H+5",
+        "H+6",
+        "H+7",
+        ">H+7",
+    ]
     df_pivot = df_pivot[[c for c in expected_cols if c in df_pivot.columns]]
     df_pivot["Grand Total"] = df_pivot.sum(axis=1)
     st.dataframe(df_pivot, use_container_width=True)
 
-    st.subheader(f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]")
+    st.subheader(
+        f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
+    )
     df_detail_filtered = filtered_pivot_df.copy()
     if selected_aging_group != "Semua Aging":
       df_detail_filtered = df_detail_filtered[
@@ -586,8 +640,9 @@ try:
     )
 
   else:
-    st.subheader("⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)")
-    # (Logika halaman UnInbound tetap sama seperti sebelumnya)
+    st.subheader(
+        "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
+    )
     st.info("Fitur UnInbound aktif.")
 
 except Exception as e:
