@@ -12,16 +12,18 @@ from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 # =========================================================
 # KONFIGURASI
 # =========================================================
-TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
+TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"  # Folder utama CSV
+SUPPORTING_GDRIVE_FOLDER_ID = (
+    "1EsUiz1Egqzlbk0gpaohr7lZBcR5rqB2Y"  # Folder DATA FILTER
+)
 
 TEMP_CSV_DIR = "temp_csv_files"
 OUTPUT_PARQUET = "data_inbound_2026.parquet"
+CODING_FILE_NAME = "Coding.xlsx"
 
 
 def get_drive_service():
   SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-  # Membaca string Base64 langsung dari GitHub Actions Environment Variable
   b64_secret = os.environ.get("GDRIVE_CREDENTIALS_B64")
 
   if b64_secret:
@@ -35,7 +37,6 @@ def get_drive_service():
         "Environment Variable 'GDRIVE_CREDENTIALS_B64' tidak ditemukan!"
     )
 
-  # Penanganan mutlak format private_key agar tidak terkena Invalid JWT Signature
   if "private_key" in creds_dict:
     pk = str(creds_dict["private_key"])
     pk = pk.replace("\\n", "\n")
@@ -71,7 +72,6 @@ def download_gdrive_folder(service, folder_id, local_path):
       file_name = item["name"]
       mime_type = item["mimeType"]
 
-      # Abaikan file output parquet jika ada di folder
       if file_name == OUTPUT_PARQUET:
         continue
 
@@ -96,6 +96,31 @@ def download_gdrive_folder(service, folder_id, local_path):
       break
 
 
+def download_specific_file(service, folder_id, file_name, local_path):
+  try:
+    query = (
+        f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
+    )
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get("files", [])
+    if not items:
+      return False
+    file_id = items[0]["id"]
+    print(f"Mengunduh file pendukung: {file_name}")
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+      status, done = downloader.next_chunk()
+    with open(local_path, "wb") as f:
+      f.write(fh.getvalue())
+    return True
+  except Exception as e:
+    print(f"Gagal mengunduh {file_name}: {e}")
+    return False
+
+
 # =========================================================
 # 1. PROSES UTAMA & MENGUNDUH DATA DARI GOOGLE DRIVE
 # =========================================================
@@ -105,32 +130,27 @@ service = get_drive_service()
 if os.path.exists(TEMP_CSV_DIR):
   shutil.rmtree(TEMP_CSV_DIR)
 
-print("2. Mengunduh seluruh file (CSV & Folder Filter) dari Google Drive...")
+print("2. Mengunduh seluruh file CSV utama dari Google Drive...")
 download_gdrive_folder(service, TARGET_GDRIVE_FOLDER_ID, TEMP_CSV_DIR)
+
+# Mengunduh Coding.xlsx langsung dari folder DATA FILTER
+local_coding_path = os.path.join(TEMP_CSV_DIR, CODING_FILE_NAME)
+download_specific_file(
+    service, SUPPORTING_GDRIVE_FOLDER_ID, CODING_FILE_NAME, local_coding_path
+)
 
 # =========================================================
 # 2. MEMBACA FILE PENDUKUNG CODING.XLSX
 # =========================================================
 print("\n3. Membaca file pendukung Coding.xlsx...")
-coding_file_path = None
+if os.path.exists(local_coding_path):
+  print(f"File Coding.xlsx ditemukan di: {local_coding_path}")
+  df_coding = pd.read_excel(local_coding_path)
 
-# Mencari file Coding.xlsx secara rekursif di dalam folder hasil unduhan
-for root, dirs, files in os.walk(TEMP_CSV_DIR):
-  for f in files:
-    if f.lower() == "coding.xlsx":
-      coding_file_path = os.path.join(root, f)
-      break
-
-if coding_file_path and os.path.exists(coding_file_path):
-  print(f"File Coding.xlsx ditemukan di: {coding_file_path}")
-  df_coding = pd.read_excel(coding_file_path)
-
-  # Bersihkan spasi pada nama kolom dan ambil kolom referensi
   df_coding.columns = df_coding.columns.str.strip()
   df_coding = df_coding[["CODE", "CATEGORY", "DESCRIPTION"]].drop_duplicates(
       subset=["CODE"]
   )
-  # Ubah nama kolom sesuai permintaan
   df_coding.rename(
       columns={"CATEGORY": "Categori POD", "DESCRIPTION": "Desc POD"},
       inplace=True,
@@ -149,9 +169,7 @@ print(
 con = duckdb.connect()
 con.execute("PRAGMA memory_limit='3GB';")
 
-# Daftarkan DataFrame referensi Coding ke dalam DuckDB
 con.register("df_coding_ref", df_coding)
-
 csv_pattern = os.path.join(TEMP_CSV_DIR, "**", "*.csv")
 
 query_duckdb = f"""
@@ -172,7 +190,6 @@ print(
     f" 'Desc POD' berhasil dibuat: {OUTPUT_PARQUET}"
 )
 
-# Membersihkan folder sementara di lokal
 shutil.rmtree(TEMP_CSV_DIR)
 print("Folder sementara di lokal telah dibersihkan.")
 
@@ -191,20 +208,12 @@ results = service.files().list(q=query, fields="files(id, name)").execute()
 items = results.get("files", [])
 
 if items:
-  # Jika file sudah ada, timpa (update) isinya tanpa mengubah ID
   file_id = items[0]["id"]
   print(f"Menimpa isi file lama (ID: {file_id})...")
-  updated_file = (
-      service.files().update(fileId=file_id, media_body=media).execute()
-  )
+  service.files().update(fileId=file_id, media_body=media).execute()
   print("🎉 SUKSES! File Parquet berhasil diperbarui di Google Drive!")
 else:
-  # Jika file belum ada sama sekali, buat baru
   print("File Parquet belum ada, membuat file baru...")
   file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
-  uploaded_file = (
-      service.files()
-      .create(body=file_metadata, media_body=media, fields="id")
-      .execute()
-  )
+  service.files().create(body=file_metadata, media_body=media, fields="id").execute()
   print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
