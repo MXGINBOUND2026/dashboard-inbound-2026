@@ -18,7 +18,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
-          pip install gdown duckdb google-api-python-client google-auth-httplib2 google-auth-oauthlib pyarrow
+          pip install gdown duckdb google-api-python-client google-auth-httplib2 google-auth-oauthlib pyarrow pandas openpyxl
 
       - name: Run Convert Script
         env:
