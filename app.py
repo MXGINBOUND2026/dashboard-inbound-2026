@@ -351,8 +351,7 @@ st.markdown(
 )
 
 st.success(
-    "⚡ File Parquet dan Data Pendukung dimuat secara instan menggunakan"
-    " DuckDB!"
+    "⚡ Data Success Update !"
 )
 
 # State navigasi untuk mengontrol tampilan aktif dari klik kartu/tombol
