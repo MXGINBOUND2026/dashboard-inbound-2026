@@ -148,159 +148,189 @@ except Exception as e:
   st.warning(f"Perhatian saat membaca file Excel pendukung: {e}")
 
 # =========================================================
-# QUERY DATA UTAMA DARI PARQUET
+# QUERY DATA UTAMA DARI PARQUET (SAFE QUERY WITH COLUMN CHECK)
 # =========================================================
-base_query = f"""
-    WITH filtered_raw AS (
-        SELECT *
-        FROM read_parquet('{LOCAL_PARQUET_PATH}')
-    ),
-    parsed_dates AS (
-        SELECT 
-            *,
-            COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
-            COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
-            COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
-            COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
-            COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
-            COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm,
-            COALESCE(TRY_STRPTIME(RECEIVING_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(RECEIVING_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(RECEIVING_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(RECEIVING_DATE AS TIMESTAMP)) AS dt_rec,
-            COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_out,
-            COALESCE(TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)) AS dt_run,
-            COALESCE(TRY_STRPTIME(TGL_RECEIVED, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_RECEIVED AS TIMESTAMP)) AS dt_tgl_rec
-        FROM filtered_raw
-    ),
-    joined_locations AS (
-        SELECT 
-            p.*,
-            u_im.USER_ZONE_NAME AS IM_LOCATION,
-            u_mts.USER_ZONE_NAME AS MTS_LOCATION,
-            u_mti.USER_ZONE_NAME AS MTI_LOCATION,
-            CASE WHEN UPPER(COALESCE(p.TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN u_tm.USER_ZONE_NAME ELSE NULL END AS TM_LOCATION
-        FROM parsed_dates p
-        LEFT JOIN user_id_tbl u_im ON p.USER_IM = u_im.USER_ID
-        LEFT JOIN user_id_tbl u_mts ON p.MTS_USER = u_mts.USER_ID
-        LEFT JOIN user_id_tbl u_mti ON p.MTI_USER = u_mti.USER_ID
-        LEFT JOIN user_id_tbl u_tm ON p.TRANSIT_MANIFEST_USER = u_tm.USER_ID
-    ),
-    calculated AS (
-        SELECT 
-            j.*,
-            GREATEST(
-                CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
-                CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
-                CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
-                CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
-                CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
-                CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
-            ) AS valid_inbound_date
-        FROM joined_locations j
-    ),
-    with_status_and_aging AS (
-        SELECT 
-            c.*,
-            CASE 
-                WHEN valid_inbound_date IS NULL THEN NULL
-                WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
-                WHEN valid_inbound_date = dt_hvo THEN TRY_CAST(c.HVO_HUB_NAME AS VARCHAR)
-                WHEN valid_inbound_date = dt_hvi THEN TRY_CAST(c.HVO_HUB_DESTINATION_NAME AS VARCHAR)
-                WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
-                WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
-                WHEN valid_inbound_date = dt_tm  THEN TM_LOCATION
-                ELSE NULL
-            END AS LAST_LOCATION,
-            
-            -- LOGIKA HIERARKI STATUS SHIPMENT
-            CASE 
-                WHEN AWB_CANCEL IS NOT NULL AND TRIM(CAST(AWB_CANCEL AS VARCHAR)) != '' AND UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'N' THEN 'AWB Cancel'
-                WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
-                
-                WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
-                     AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVO_DATE IS NULL AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' AND OUTBOUND_MANIFEST_DATE IS NOT NULL) 
-                THEN 'UnOutbound'
-                
-                WHEN (INBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(INBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR INBOUND_MANIFEST_DATE = '-')
-                     AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVI_DATE IS NULL AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL) 
-                THEN 'UnInbound'
-                
-                WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' 
-                     AND (MANIFEST_INBOUND_SUBAGEN_NO IS NULL OR TRIM(CAST(MANIFEST_INBOUND_SUBAGEN_NO AS VARCHAR)) = '' OR MANIFEST_INBOUND_SUBAGEN_NO = '-') 
-                THEN 'UnMTI'
-                
-                WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
-                     AND UPPER(COALESCE(PRA_RUNSHEET_NO, '')) LIKE '%MXG%' 
-                THEN 'UnRunsheet with PRA'
-                
-                WHEN DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-' 
-                THEN 'UnRunsheet'
-                
-                -- PUNCAK PERUBAHAN 1: STATUS UnRunsheet AU (HOC)
-                WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
-                     AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HOC%'
-                THEN 'UnRunsheet AU (HOC)'
-                
-                WHEN DATE_RUNSHEET IS NOT NULL AND CAST(dt_run AS DATE) = CURRENT_DATE 
-                     AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
-                THEN 'On Delivery Today'
-                
-                WHEN DATE_RUNSHEET IS NOT NULL 
-                     AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
-                THEN 'Open POD'
-                
-                WHEN UPPER(COALESCE(STATUS_POD, '')) IN ('SUCCESS', 'RETURN SHIPPER') 
-                     AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) NOT LIKE '%HRS%' 
-                THEN 'Success UnHRS'
-                
-                WHEN (CODING IS NOT NULL AND TRIM(CAST(CODING AS VARCHAR)) != '' AND CODING != '-')
-                     AND (WUS_REMARKS IS NULL OR TRIM(CAST(WUS_REMARKS AS VARCHAR)) = '' OR WUS_REMARKS = '-')
-                     AND UPPER(COALESCE(POD_Category, '')) NOT IN (
-                         'CLAIM MISSING PROCESS', 'CLAIM DAMAGE PROCESS', 'CLOSE BY SYSTEM (ORIGIN)', 
-                         'CLOSE BY SYSTEM (DEST)', 'CUSTOMER REQUEST CANCEL', 'CUSTOMER REQUEST', 
-                         'SUCCESS CLAIM', 'BREACH', 'KIRIMAN DISITA OLEH BEA CUKAI', 
-                         'KIRIMAN DISITA OLEH KEPOLISIAN', 'KIRIMAN RETURN BREACH', 'MISSING'
-                     ) 
-                THEN 'UnHRS'
-                
-                ELSE COALESCE(POD_Category, 'UNKNOWN')
-            END AS Status_Shipment,
+try:
+  # Cek kolom yang tersedia di file Parquet
+  parquet_cols = [
+      col[0]
+      for col in conn.execute(
+          f"DESCRIBE SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+      ).fetchall()
+  ]
 
-            -- LOGIKA AGING SHIPMENT
+  wus_outgoing_col = (
+      "WUS_OUTGOING_CODE" if "WUS_OUTGOING_CODE" in parquet_cols else "NULL"
+  )
+  status_pod_col = "STATUS_POD" if "STATUS_POD" in parquet_cols else "NULL"
+  pod_category_col = (
+      "POD_Category"
+      if "POD_Category" in parquet_cols
+      else ("Categori POD" if "Categori POD" in parquet_cols else "NULL")
+  )
+  pod_desc_col = (
+      "POD_DESC"
+      if "POD_DESC" in parquet_cols
+      else ("Desc POD" if "Desc POD" in parquet_cols else "NULL")
+  )
+
+  base_query = f"""
+        WITH filtered_raw AS (
+            SELECT *
+            FROM read_parquet('{LOCAL_PARQUET_PATH}')
+        ),
+        parsed_dates AS (
+            SELECT 
+                *,
+                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
+                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
+                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
+                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
+                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
+                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm,
+                COALESCE(TRY_STRPTIME(RECEIVING_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(RECEIVING_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(RECEIVING_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(RECEIVING_DATE AS TIMESTAMP)) AS dt_rec,
+                COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_out,
+                COALESCE(TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)) AS dt_run,
+                COALESCE(TRY_STRPTIME(TGL_RECEIVED, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_RECEIVED AS TIMESTAMP)) AS dt_tgl_rec,
+                
+                CAST({wus_outgoing_col} AS VARCHAR) AS safe_wus_outgoing,
+                CAST({status_pod_col} AS VARCHAR) AS safe_status_pod,
+                CAST({pod_category_col} AS VARCHAR) AS safe_pod_category,
+                CAST({pod_desc_col} AS VARCHAR) AS safe_pod_desc
+            FROM filtered_raw
+        ),
+        joined_locations AS (
+            SELECT 
+                p.*,
+                u_im.USER_ZONE_NAME AS IM_LOCATION,
+                u_mts.USER_ZONE_NAME AS MTS_LOCATION,
+                u_mti.USER_ZONE_NAME AS MTI_LOCATION,
+                CASE WHEN UPPER(COALESCE(p.TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN u_tm.USER_ZONE_NAME ELSE NULL END AS TM_LOCATION
+            FROM parsed_dates p
+            LEFT JOIN user_id_tbl u_im ON p.USER_IM = u_im.USER_ID
+            LEFT JOIN user_id_tbl u_mts ON p.MTS_USER = u_mts.USER_ID
+            LEFT JOIN user_id_tbl u_mti ON p.MTI_USER = u_mti.USER_ID
+            LEFT JOIN user_id_tbl u_tm ON p.TRANSIT_MANIFEST_USER = u_tm.USER_ID
+        ),
+        calculated AS (
+            SELECT 
+                j.*,
+                GREATEST(
+                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
+                    CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
+                ) AS valid_inbound_date
+            FROM joined_locations j
+        ),
+        with_status_and_aging AS (
+            SELECT 
+                c.*,
+                CASE 
+                    WHEN valid_inbound_date IS NULL THEN NULL
+                    WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
+                    WHEN valid_inbound_date = dt_hvo THEN TRY_CAST(c.HVO_HUB_NAME AS VARCHAR)
+                    WHEN valid_inbound_date = dt_hvi THEN TRY_CAST(c.HVO_HUB_DESTINATION_NAME AS VARCHAR)
+                    WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
+                    WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
+                    WHEN valid_inbound_date = dt_tm  THEN TM_LOCATION
+                    ELSE NULL
+                END AS LAST_LOCATION,
+                
+                -- LOGIKA HIERARKI STATUS SHIPMENT
+                CASE 
+                    WHEN AWB_CANCEL IS NOT NULL AND TRIM(CAST(AWB_CANCEL AS VARCHAR)) != '' AND UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) != 'N' THEN 'AWB Cancel'
+                    WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
+                    
+                    WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
+                         AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVO_DATE IS NULL AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' AND OUTBOUND_MANIFEST_DATE IS NOT NULL) 
+                    THEN 'UnOutbound'
+                    
+                    WHEN (INBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(INBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR INBOUND_MANIFEST_DATE = '-')
+                         AND NOT (UPPER(SERVICE) LIKE '%CTC%' AND HVI_DATE IS NULL AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' AND INBOUND_MANIFEST_DATE IS NOT NULL) 
+                    THEN 'UnInbound'
+                    
+                    WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' 
+                         AND (MANIFEST_INBOUND_SUBAGEN_NO IS NULL OR TRIM(CAST(MANIFEST_INBOUND_SUBAGEN_NO AS VARCHAR)) = '' OR MANIFEST_INBOUND_SUBAGEN_NO = '-') 
+                    THEN 'UnMTI'
+                    
+                    WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
+                         AND UPPER(COALESCE(PRA_RUNSHEET_NO, '')) LIKE '%MXG%' 
+                    THEN 'UnRunsheet with PRA'
+                    
+                    WHEN DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-' 
+                    THEN 'UnRunsheet'
+                    
+                    WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
+                         AND UPPER(COALESCE(safe_wus_outgoing, '')) LIKE '%HOC%'
+                    THEN 'UnRunsheet AU (HOC)'
+                    
+                    WHEN DATE_RUNSHEET IS NOT NULL AND CAST(dt_run AS DATE) = CURRENT_DATE 
+                         AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
+                    THEN 'On Delivery Today'
+                    
+                    WHEN DATE_RUNSHEET IS NOT NULL 
+                         AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
+                    THEN 'Open POD'
+                    
+                    WHEN UPPER(COALESCE(safe_status_pod, '')) IN ('SUCCESS', 'RETURN SHIPPER') 
+                         AND UPPER(COALESCE(safe_wus_outgoing, '')) NOT LIKE '%HRS%' 
+                    THEN 'Success UnHRS'
+                    
+                    WHEN (CODING IS NOT NULL AND TRIM(CAST(CODING AS VARCHAR)) != '' AND CODING != '-')
+                         AND (WUS_REMARKS IS NULL OR TRIM(CAST(WUS_REMARKS AS VARCHAR)) = '' OR WUS_REMARKS = '-')
+                         AND UPPER(COALESCE(safe_pod_category, '')) NOT IN (
+                             'CLAIM MISSING PROCESS', 'CLAIM DAMAGE PROCESS', 'CLOSE BY SYSTEM (ORIGIN)', 
+                             'CLOSE BY SYSTEM (DEST)', 'CUSTOMER REQUEST CANCEL', 'CUSTOMER REQUEST', 
+                             'SUCCESS CLAIM', 'BREACH', 'KIRIMAN DISITA OLEH BEA CUKAI', 
+                             'KIRIMAN DISITA OLEH KEPOLISIAN', 'KIRIMAN RETURN BREACH', 'MISSING'
+                         ) 
+                    THEN 'UnHRS'
+                    
+                    ELSE COALESCE(safe_pod_category, 'UNKNOWN')
+                END AS Status_Shipment,
+
+                -- LOGIKA AGING SHIPMENT
+                CASE 
+                    WHEN dt_tgl_rec IS NOT NULL THEN DATEDIFF('day', dt_tgl_rec, CURRENT_TIMESTAMP)
+                    ELSE DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP)
+                END AS Aging_Shipment
+
+            FROM calculated c
+        )
+        SELECT 
+            COALESCE(w.AWB, '-') AS AWB,
+            COALESCE(w.SERVICE, '-') AS SERVICE,
+            COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
+            w.valid_inbound_date AS Last_Inbound,
+            COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
+            COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
+            COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
+            COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
+            w.Status_Shipment AS Status_Shipment,
+            w.Aging_Shipment AS age_days,
+            COALESCE(w.safe_pod_category, '-') AS POD_Category,
+            COALESCE(w.safe_pod_desc, '-') AS POD_DESC,
             CASE 
-                WHEN dt_tgl_rec IS NOT NULL THEN DATEDIFF('day', dt_tgl_rec, CURRENT_TIMESTAMP)
-                ELSE DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP)
-            END AS Aging_Shipment
-
-        FROM calculated c
-    )
-    SELECT 
-        COALESCE(w.AWB, '-') AS AWB,
-        COALESCE(w.SERVICE, '-') AS SERVICE,
-        COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
-        w.valid_inbound_date AS Last_Inbound,
-        COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
-        COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
-        COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
-        COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
-        w.Status_Shipment AS Status_Shipment,
-        w.Aging_Shipment AS age_days,
-        COALESCE(w.POD_Category, '-') AS POD_Category,
-        COALESCE(w.POD_DESC, '-') AS POD_DESC,
-        CASE 
-            WHEN age_days <= 0 THEN 'H+0'
-            WHEN age_days = 1 THEN 'H+1'
-            WHEN age_days = 2 THEN 'H+2'
-            WHEN age_days = 3 THEN 'H+3'
-            WHEN age_days = 4 THEN 'H+4'
-            WHEN age_days = 5 THEN 'H+5'
-            WHEN age_days = 6 THEN 'H+6'
-            WHEN age_days = 7 THEN 'H+7'
-            ELSE '>H+7'
-        END AS aging_group
-    FROM with_status_and_aging w
-    LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
-"""
-
-df_raw_all = conn.execute(base_query).fetchdf()
+                WHEN age_days <= 0 THEN 'H+0'
+                WHEN age_days = 1 THEN 'H+1'
+                WHEN age_days = 2 THEN 'H+2'
+                WHEN age_days = 3 THEN 'H+3'
+                WHEN age_days = 4 THEN 'H+4'
+                WHEN age_days = 5 THEN 'H+5'
+                WHEN age_days = 6 THEN 'H+6'
+                WHEN age_days = 7 THEN 'H+7'
+                ELSE '>H+7'
+            END AS aging_group
+        FROM with_status_and_aging w
+        LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
+    """
+  df_raw_all = conn.execute(base_query).fetchdf()
+except Exception as err:
+  st.error(f"Gagal memuat database DuckDB: {err}")
+  st.stop()
 
 # =========================================================
 # SIDEBAR FILTERS (TERMASUK FILTER SHIPMENT STATUS)
@@ -326,13 +356,10 @@ chosen_zona = st.sidebar.selectbox(
 chosen_kecamatan = st.sidebar.selectbox(
     "📍 Filter Kecamatan:", ["Semua Kecamatan"] + list(unique_kecamatan)
 )
-
-# PERMINTAAN 5: FILTER SHIPMENT_STATUS DI SIDEBAR
 chosen_status = st.sidebar.selectbox(
     "📦 Filter Shipment Status:", ["Semua Status"] + list(unique_status)
 )
 
-# PROSES FILTERING GLOBAL DF BERDASARKAN SELURUH FILTER SIDEBAR
 filtered_df = df_raw_all.copy()
 if chosen_loc != "Semua Last Location":
   filtered_df = filtered_df[filtered_df["LAST_LOCATION"] == chosen_loc]
@@ -397,7 +424,6 @@ st.markdown(
 if "active_view" not in st.session_state:
   st.session_state.active_view = "UnRunsheet"
 
-# PERMINTAAN 2 & 3: KARTU METRIK DIHITUNG DARI DATA TERFILTER SIDEBAR
 total_awb = filtered_df["AWB"].nunique()
 total_uninbound = filtered_df[filtered_df["Status_Shipment"] == "UnInbound"][
     "AWB"
@@ -407,8 +433,6 @@ total_unrunsheet = filtered_df[
         ["UnRunsheet", "UnRunsheet with PRA", "UnRunsheet AU (HOC)"]
     )
 ]["AWB"].nunique()
-
-# Hitung Unrunsheet AU (HOC) khusus dari Status_Shipment
 total_unrunsheet_au = filtered_df[
     filtered_df["Status_Shipment"] == "UnRunsheet AU (HOC)"
 ]["AWB"].nunique()
@@ -453,7 +477,6 @@ if view_choice == "📊 Analisis UnRunsheet":
       " TGL_RECEIVED ke Hari Ini)"
   )
 
-  # Filter khusus UnRunsheet untuk grafik aging
   df_unrun_only = filtered_df[
       filtered_df["Status_Shipment"].isin(
           ["UnRunsheet", "UnRunsheet with PRA", "UnRunsheet AU (HOC)"]
@@ -537,10 +560,6 @@ if view_choice == "📊 Analisis UnRunsheet":
 
   st.markdown("---")
 
-  # =========================================================
-  # PERMINTAAN 4: TABEL STATUS_SHIPMENT (MATRIX PIVOT)
-  # Header: Aging_Shipment, Row: Status_Shipment, Value: Distinct Count AWB
-  # =========================================================
   st.subheader(
       "📊 Tabel Matrix Status Shipment (Status Shipment ➔ Aging Shipment)"
   )
@@ -575,7 +594,6 @@ if view_choice == "📊 Analisis UnRunsheet":
 
   st.markdown("---")
 
-  # TABEL PIVOT HIRARKI LOKASI
   st.subheader(
       "🗂️ Unrunsheet By Last Location (Pivot Hirarki: Last Location ➔ Cabang ➔"
       " Zona ➔ Kecamatan)"
