@@ -67,7 +67,9 @@ def get_drive_service():
 
 def download_file_from_drive(service, folder_id, file_name, local_path):
   try:
-    query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
+    query = (
+        f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
+    )
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get("files", [])
     if not items:
@@ -156,6 +158,44 @@ try:
     conn.register("user_id_tbl", df_user_id)
 except Exception as e:
   st.warning(f"Perhatian saat membaca file Excel pendukung: {e}")
+
+# =========================================================
+# RUNNING TEXT: LAST UPDATE AT (MAX TGL_TARIK_REPORT)
+# =========================================================
+try:
+  # Mengambil nilai max TGL_TARIK_REPORT langsung menggunakan DuckDB untuk efisiensi
+  max_date_df = conn.execute(f"""
+        SELECT MAX(
+            COALESCE(
+                TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M'), 
+                TRY_STRPTIME(TGL_TARIK_REPORT, '%d-%b-%Y %H:%M'), 
+                TRY_STRPTIME(TGL_TARIK_REPORT, '%Y-%m-%d %H:%M'), 
+                TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)
+            )
+        ) as max_dt 
+        FROM read_parquet('{LOCAL_PARQUET_PATH}')
+    """).fetchdf()
+
+  max_date = (
+      max_date_df["max_dt"][0] if not max_date_df.empty else None
+  )
+
+  if pd.notnull(max_date):
+    # Format: dd mmm yyyy hh:mm (Contoh: 20 Oct 2026 14:30)
+    formatted_date = pd.to_datetime(max_date).strftime("%d %b %Y %H:%M")
+  else:
+    formatted_date = "Waktu pembaruan tidak tersedia"
+except Exception:
+  formatted_date = "Format tanggal tidak dikenali"
+
+st.markdown(
+    f"""
+    <marquee style="color: #1f77b4; background-color: #f0f2f6; padding: 8px; border-radius: 5px; font-weight: 600; font-size: 14px;">
+        🔄 Last Update At: {formatted_date}
+    </marquee>
+""",
+    unsafe_allow_html=True,
+)
 
 st.success(
     "⚡ File Parquet dan Data Pendukung dimuat secara instan menggunakan"
@@ -618,7 +658,9 @@ try:
   # VIEW 2: TABEL UNINBOUND (REVISI LOGIKA UTUH)
   # =========================================================
   else:
-    st.subheader("⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)")
+    st.subheader(
+        "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
+    )
 
     uninbound_query = f"""
             WITH filtered_raw AS (
