@@ -128,7 +128,9 @@ print("Folder CSV sementara di lokal telah dibersihkan.")
 # =========================================================
 # 4. UPLOAD / UPDATE PARQUET KEMBALI KE GOOGLE DRIVE
 # =========================================================
-print("\n4. Mengunggah file Parquet ke Google Drive...")
+print(
+    "\n4. Memperbarui (Update) file Parquet yang sudah ada di Google Drive..."
+)
 media = MediaFileUpload(
     OUTPUT_PARQUET, mimetype="application/octet-stream", resumable=True
 )
@@ -138,21 +140,22 @@ results = service.files().list(q=query, fields="files(id, name)").execute()
 items = results.get("files", [])
 
 if items:
+  # Jika file sudah ada, timpa (update) isinya tanpa menghapus ID-nya
   file_id = items[0]["id"]
-  print("Menghapus file lama sebelum mengunggah versi baru...")
-  try:
-    service.files().delete(fileId=file_id).execute()
-  except Exception as e:
-    print(f"Info: {e}")
-
-print("Mengunggah file Parquet baru ke Drive...")
-file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
-
-# Upload file baru
-uploaded_file = (
-    service.files()
-    .create(body=file_metadata, media_body=media, fields="id")
-    .execute()
-)
-
-print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
+  print(f"Menimpa isi file lama (ID: {file_id})...")
+  updated_file = (
+      service.files()
+      .update(fileId=file_id, media_body=media)
+      .execute()
+  )
+  print("🎉 SUKSES! File Parquet berhasil diperbarui di Google Drive!")
+else:
+  # Jika file belum pernah ada sama sekali, buat baru
+  print("File Parquet belum ada, membuat file baru...")
+  file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
+  uploaded_file = (
+      service.files()
+      .create(body=file_metadata, media_body=media, fields="id")
+      .execute()
+  )
+  print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
