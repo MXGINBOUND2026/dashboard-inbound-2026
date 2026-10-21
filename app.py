@@ -9,13 +9,9 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-# =========================================================
-# KONFIGURASI HALAMAN STREAMLIT
-# =========================================================
 st.set_page_config(
     page_title="Database Inbound 2026", page_icon="🚚", layout="wide"
 )
-
 st.title("🚚 Database Inbound 2026")
 
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
@@ -79,9 +75,6 @@ def sync_parquet_from_gdrive():
       return False
 
 
-# =========================================================
-# SIDEBAR REFRESH & SINKRONISASI
-# =========================================================
 st.sidebar.header("⚙️ Pengaturan & Sinkronisasi GDrive")
 if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.cache_resource.clear()
@@ -95,22 +88,15 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.error("File database tidak dapat diunduh. Silakan cek koneksi/GDrive.")
     st.stop()
 
-# =========================================================
-# UTAMA: BACA DATA PARQUET VIA DUCKDB
-# =========================================================
 try:
   conn = duckdb.connect()
 
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
 
-  # 1. Filter Range Tanggal Last_Inbound
   min_max_date = conn.execute(f"""
-        SELECT 
-            MIN(CAST(Last_Inbound AS DATE)) as min_d, 
-            MAX(CAST(Last_Inbound AS DATE)) as max_d 
-        FROM read_parquet('{LOCAL_PARQUET_PATH}')
-        WHERE Last_Inbound IS NOT NULL
+        SELECT MIN(CAST(Last_Inbound AS DATE)) as min_d, MAX(CAST(Last_Inbound AS DATE)) as max_d 
+        FROM read_parquet('{LOCAL_PARQUET_PATH}') WHERE Last_Inbound IS NOT NULL
     """).fetchdf()
 
   default_start = (
@@ -167,6 +153,13 @@ try:
           " NULL ORDER BY 1"
       ).fetchall()
   ]
+  unique_hrs = [
+      r[0]
+      for r in conn.execute(
+          f"SELECT DISTINCT HRS FROM read_parquet('{LOCAL_PARQUET_PATH}') WHERE"
+          " HRS IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
 
   chosen_loc = st.sidebar.selectbox(
       "🔍 Filter Last Location:", ["Semua Last Location"] + unique_locations
@@ -183,10 +176,11 @@ try:
   chosen_status = st.sidebar.selectbox(
       "📦 Filter Shipment Status:", ["Semua Status"] + unique_status
   )
+  chosen_hrs = st.sidebar.selectbox(
+      "📋 Filter Status HRS:", ["Semua Status HRS"] + unique_hrs
+  )
 
   where_clauses = []
-
-  # Penerapan Filter Range Tanggal Last_Inbound
   if isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
     where_clauses.append(
@@ -203,6 +197,8 @@ try:
     where_clauses.append(f"Kecamatan = '{chosen_kecamatan}'")
   if chosen_status != "Semua Status":
     where_clauses.append(f"Status_Shipment = '{chosen_status}'")
+  if chosen_hrs != "Semua Status HRS":
+    where_clauses.append(f"HRS = '{chosen_hrs}'")
 
   where_sql = (
       "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
@@ -218,8 +214,7 @@ try:
                     TRY_STRPTIME(TGL_TARIK_REPORT, '%Y-%m-%d %H:%M'), 
                     TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)
                 )
-            ) as max_dt 
-            FROM read_parquet('{LOCAL_PARQUET_PATH}')
+            ) as max_dt FROM read_parquet('{LOCAL_PARQUET_PATH}')
         """).fetchdf()
     max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
     formatted_date = (
@@ -233,7 +228,7 @@ try:
   top_kec_df = conn.execute(f"""
         SELECT Kecamatan, COUNT(DISTINCT AWB) as total 
         FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql} 
-        AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)')
+        AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
         GROUP BY Kecamatan ORDER BY total DESC LIMIT 5
     """).fetchdf()
 
@@ -255,20 +250,20 @@ try:
   if "active_view" not in st.session_state:
     st.session_state.active_view = "UnRunsheet"
 
-  # Metric Cards
+  # Metric Cards (Kartu 4 diganti menjadi UnRunsheet with PRA)
   metrics_res = conn.execute(f"""
         SELECT 
             COUNT(DISTINCT AWB) AS total_awb,
             COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnInbound' THEN AWB END) AS total_uninbound,
-            COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)') THEN AWB END) AS total_unrunsheet,
-            COUNT(DISTINCT CASE WHEN Status_Shipment = 'Unrunsheet AU (HOC)' THEN AWB END) AS total_unrunsheet_au
+            COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) AS total_unrunsheet,
+            COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra
         FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
     """).fetchdf()
 
   total_awb = metrics_res["total_awb"][0] or 0
   total_uninbound = metrics_res["total_uninbound"][0] or 0
   total_unrunsheet = metrics_res["total_unrunsheet"][0] or 0
-  total_unrunsheet_au = metrics_res["total_unrunsheet_au"][0] or 0
+  total_unrunsheet_pra = metrics_res["total_unrunsheet_pra"][0] or 0
 
   c1, c2, c3, c4 = st.columns(4)
   with c1:
@@ -290,13 +285,15 @@ try:
       st.session_state.active_view = "UnRunsheet"
       st.rerun()
   with c4:
-    st.metric(label="🚚 Unrunsheet AU (HOC)", value=f"{total_unrunsheet_au:,}")
+    st.metric(
+        label="🚚 UnRunsheet with PRA", value=f"{total_unrunsheet_pra:,}"
+    )
     if st.button(
-        "👉 Lihat UnRunsheet AU",
-        key="btn_unrunsheet_au",
+        "👉 Lihat UnRunsheet PRA",
+        key="btn_unrunsheet_pra",
         use_container_width=True,
     ):
-      st.session_state.active_view = "UnRunsheet AU"
+      st.session_state.active_view = "UnRunsheet PRA"
       st.rerun()
 
   st.markdown("---")
@@ -314,12 +311,10 @@ try:
         " Ini)"
     )
 
-    # Filter khusus UnRunsheet jika Sidebar Status tidak dispesifikasikan
     unrunsheet_status_clause = (
         ""
         if chosen_status != "Semua Status"
-        else "AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA',"
-        " 'Unrunsheet AU (HOC)')"
+        else "AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
     )
 
     df_aging = conn.execute(f"""
@@ -444,13 +439,13 @@ try:
     else:
       st.info("Tidak ada data Unrunsheet.")
 
-    # Detail Data Table
+    # Detail Data Table (Lengkap dengan kolom baru HRS)
     st.subheader(
         f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
     )
 
     df_detail = conn.execute(f"""
-            SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, POD_Category, POD_DESC, WUS_REMARKS
+            SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             {where_sql} {unrunsheet_status_clause} {aging_clause}
             ORDER BY age_days DESC
@@ -464,7 +459,7 @@ try:
         "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
     )
     df_uninbound_show = conn.execute(f"""
-            SELECT AWB, Cabang, Zona, Kecamatan, age_days AS "Aging (Hari)", SERVICE, Status_Shipment
+            SELECT AWB, Cabang, Zona, Kecamatan, age_days AS "Aging (Hari)", SERVICE, Status_Shipment, HRS
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             {where_sql} AND Status_Shipment = 'UnInbound'
             ORDER BY age_days DESC
