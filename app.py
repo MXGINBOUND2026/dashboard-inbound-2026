@@ -3,7 +3,6 @@ import io
 import os
 import duckdb
 import pandas as pd
-import pydeck as pdk
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -102,9 +101,56 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 try:
   conn = duckdb.connect()
 
-  tab1, tab2, tab3 = st.tabs(
-      ["📊 Main Dashboard", "🔒 Summary Exec", "📍 Map UnRunsheet"]
+  # Memastikan kolom WUS_DATE dan BILNOTE_AMOUNT tersedia di query layer DuckDB (jika belum ada, dibuat NULL)
+  parquet_columns = conn.execute(
+      f"DESCRIBE SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+  ).fetchdf()["column_name"].tolist()
+
+  wus_col_expr = (
+      "WUS_DATE" if "WUS_DATE" in parquet_columns else "CAST(NULL AS TIMESTAMP) AS WUS_DATE"
   )
+  bil_col_expr = (
+      "BILNOTE_AMOUNT"
+      if "BILNOTE_AMOUNT" in parquet_columns
+      else "CAST(NULL AS DOUBLE) AS BILNOTE_AMOUNT"
+  )
+
+  # Buat view virtual terintegrasi dengan kolom tambahan WUS_DATE, BILNOTE_AMOUNT, COD/NON-COD, dan Aging WUS vs POD
+  conn.execute(f"""
+        CREATE OR REPLACE VIEW v_inbound AS 
+        SELECT 
+            *,
+            {wus_col_expr},
+            {bil_col_expr},
+            CASE 
+                WHEN BILNOTE_AMOUNT IS NOT NULL AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '' AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '0' 
+                THEN 'COD' 
+                ELSE 'Non COD' 
+            END AS payment_type,
+            CASE 
+                WHEN TGL_UPDATE_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN 
+                    GREATEST(0, DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)))
+                ELSE NULL 
+            END as wus_aging_days,
+            CASE 
+                WHEN TGL_UPDATE_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN
+                    CASE 
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 7 THEN 'H+7'
+                        ELSE '>H+7'
+                    END
+                ELSE 'H+0'
+            END AS wus_aging_group
+        FROM read_parquet('{LOCAL_PARQUET_PATH}')
+    """)
+
+  tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
 
   # =========================================================
   # FILTER GLOBAL SIDEBAR
@@ -112,9 +158,9 @@ try:
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
 
-  min_max_date = conn.execute(f"""
+  min_max_date = conn.execute("""
         SELECT MIN(CAST(Last_Inbound AS DATE)) as min_d, MAX(CAST(Last_Inbound AS DATE)) as max_d 
-        FROM read_parquet('{LOCAL_PARQUET_PATH}') WHERE Last_Inbound IS NOT NULL
+        FROM v_inbound WHERE Last_Inbound IS NOT NULL
     """).fetchdf()
 
   default_start = (
@@ -144,8 +190,7 @@ try:
   unique_locations = [
       r[0]
       for r in conn.execute(
-          f"SELECT DISTINCT LAST_LOCATION FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-          " WHERE LAST_LOCATION IS NOT NULL ORDER BY 1"
+          "SELECT DISTINCT LAST_LOCATION FROM v_inbound WHERE LAST_LOCATION IS NOT NULL ORDER BY 1"
       ).fetchall()
   ]
 
@@ -161,8 +206,7 @@ try:
   unique_cabang_db = [
       r[0]
       for r in conn.execute(
-          f"SELECT DISTINCT Cabang FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-          " WHERE Cabang IS NOT NULL ORDER BY 1"
+          "SELECT DISTINCT Cabang FROM v_inbound WHERE Cabang IS NOT NULL ORDER BY 1"
       ).fetchall()
   ]
   unique_cabang = [
@@ -176,30 +220,25 @@ try:
   unique_zona = [
       r[0]
       for r in conn.execute(
-          f"SELECT DISTINCT Zona FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-          " WHERE Zona IS NOT NULL ORDER BY 1"
+          "SELECT DISTINCT Zona FROM v_inbound WHERE Zona IS NOT NULL ORDER BY 1"
       ).fetchall()
   ]
   unique_kecamatan = [
       r[0]
       for r in conn.execute(
-          f"SELECT DISTINCT Kecamatan FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-          " WHERE Kecamatan IS NOT NULL ORDER BY 1"
+          "SELECT DISTINCT Kecamatan FROM v_inbound WHERE Kecamatan IS NOT NULL ORDER BY 1"
       ).fetchall()
   ]
   unique_status = [
       r[0]
       for r in conn.execute(
-          "SELECT DISTINCT Status_Shipment FROM"
-          f" read_parquet('{LOCAL_PARQUET_PATH}') WHERE Status_Shipment IS NOT"
-          " NULL ORDER BY 1"
+          "SELECT DISTINCT Status_Shipment FROM v_inbound WHERE Status_Shipment IS NOT NULL ORDER BY 1"
       ).fetchall()
   ]
   unique_hrs = [
       r[0]
       for r in conn.execute(
-          f"SELECT DISTINCT HRS FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-          " WHERE HRS IS NOT NULL ORDER BY 1"
+          "SELECT DISTINCT HRS FROM v_inbound WHERE HRS IS NOT NULL ORDER BY 1"
       ).fetchall()
   ]
 
@@ -251,7 +290,7 @@ try:
   # =========================================================
   with tab1:
     try:
-      max_date_df = conn.execute(f"""
+      max_date_df = conn.execute("""
                 SELECT MAX(
                     COALESCE(
                         TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M'), 
@@ -259,7 +298,7 @@ try:
                         TRY_STRPTIME(TGL_TARIK_REPORT, '%Y-%m-%d %H:%M'), 
                         TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)
                     )
-                ) as max_dt FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                ) as max_dt FROM v_inbound
             """).fetchdf()
       max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
       formatted_date = (
@@ -272,7 +311,7 @@ try:
 
     top_kec_df = conn.execute(f"""
             SELECT Kecamatan, COUNT(DISTINCT AWB) as total 
-            FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql} 
+            FROM v_inbound {where_sql} 
             AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
             GROUP BY Kecamatan ORDER BY total DESC LIMIT 5
         """).fetchdf()
@@ -303,7 +342,7 @@ try:
                 COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnInbound' THEN AWB END) AS total_uninbound,
                 COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) AS total_unrunsheet,
                 COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra
-            FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
+            FROM v_inbound {where_sql}
         """).fetchdf()
 
     total_awb = metrics_res["total_awb"][0] or 0
@@ -361,7 +400,7 @@ try:
                     WHEN Status_Shipment = 'UNDELIVERY' 
                          AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) 
                     THEN AWB END) AS total_undel_unhrs
-            FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
+            FROM v_inbound {where_sql}
         """).fetchdf()
 
     total_success_unhrs = metrics_custom["total_success_unhrs"][0] or 0
@@ -424,10 +463,10 @@ try:
         card_query_filter = "1=1"
 
       df_card_detail = conn.execute(f"""
-                SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
+                FROM v_inbound
                 {where_sql} AND {card_query_filter}
-                ORDER BY age_days DESC
+                ORDER BY wus_aging_days DESC
                 LIMIT 1000
             """).fetchdf()
 
@@ -474,7 +513,7 @@ try:
 
       df_aging = conn.execute(f"""
                 SELECT aging_group, COUNT(DISTINCT AWB) AS total_awb
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                FROM v_inbound
                 {where_sql} {unrunsheet_status_clause}
                 GROUP BY 1
                 ORDER BY 
@@ -551,7 +590,7 @@ try:
       pivot_matrix = conn.execute(f"""
                 PIVOT (
                     SELECT Status_Shipment, aging_group, AWB 
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql} {aging_clause}
+                    FROM v_inbound {where_sql} {aging_clause}
                 )
                 ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
                 USING COUNT(DISTINCT AWB)
@@ -578,7 +617,7 @@ try:
       pivot_loc = conn.execute(f"""
                 PIVOT (
                     SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    FROM v_inbound
                     {where_sql} {unrunsheet_status_clause} {aging_clause}
                 )
                 ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
@@ -603,10 +642,10 @@ try:
       )
 
       df_detail = conn.execute(f"""
-                SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
+                FROM v_inbound
                 {where_sql} {unrunsheet_status_clause} {aging_clause}
-                ORDER BY age_days DESC
+                ORDER BY wus_aging_days DESC
                 LIMIT 1000
             """).fetchdf()
 
@@ -617,8 +656,8 @@ try:
           "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
       )
       df_uninbound_show = conn.execute(f"""
-                SELECT AWB, Cabang, Zona, Kecamatan, age_days AS "Aging (Hari)", SERVICE, Status_Shipment, HRS
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging Last Inbound (Hari)", SERVICE, Status_Shipment, HRS
+                FROM v_inbound
                 {where_sql} AND Status_Shipment = 'UnInbound'
                 ORDER BY age_days DESC
                 LIMIT 1000
@@ -638,19 +677,22 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC
+  # TAB 2: SUMMARY EXEC (KPI & WUS vs POD AGING PERFORMANCE)
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
-      st.title("📊 Executive Summary & Performance Analytics")
+      st.title(
+          "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
+      )
 
+      # KPI Summary Cards
       kpi_data = conn.execute(f"""
                 SELECT 
                     COUNT(DISTINCT AWB) as total_ytd,
                     COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) as unrun_total,
                     COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) as total_success_unhrs_kpi,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) as total_undel_unhrs_kpi
-                FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
+                FROM v_inbound {where_sql}
             """).fetchdf()
 
       t_ytd = kpi_data["total_ytd"][0] or 0
@@ -674,15 +716,15 @@ try:
         )
       with k3:
         st.metric(
-            label="⚠️ Total Success UnHRS",
+            label="🎯 Total Success UnHRS",
             value=f"{succ_unhrs_val:,}",
-            delta="Optimized",
+            delta="Target Z A&B: H+0",
         )
       with k4:
         st.metric(
-            label="❌ Total Undel UnHRS",
+            label="⚠️ Total Undel UnHRS",
             value=f"{undel_unhrs_val:,}",
-            delta="Needs Review",
+            delta="Target Z C: H+1",
             delta_color="inverse",
         )
 
@@ -690,7 +732,7 @@ try:
 
       cab_counts = conn.execute(f"""
                 SELECT Cabang, COUNT(DISTINCT AWB) as total
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                FROM v_inbound
                 {where_sql}
                 GROUP BY Cabang
             """).fetchdf()
@@ -731,7 +773,7 @@ try:
                 SELECT 
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as min_d, 
                     MAX(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as max_d 
-                FROM read_parquet('{LOCAL_PARQUET_PATH}') 
+                FROM v_inbound 
                 {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
             """).fetchdf()
 
@@ -787,7 +829,7 @@ try:
                     {date_expr} AS periode,
                     COUNT(DISTINCT AWB) AS total_awb,
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                FROM v_inbound
                 {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
                   {inbound_date_clause}
                 GROUP BY 1
@@ -955,7 +997,7 @@ try:
       )
       df_unrun = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                FROM v_inbound
                 {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
             """).fetchdf()
@@ -968,169 +1010,45 @@ try:
       st.markdown("---")
 
       st.subheader(
-          "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging"
+          "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging WUS vs"
           " TGL_UPDATE_STATUS_POD)"
       )
       df_succ = conn.execute(f"""
-                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
-                FROM (
-                    SELECT Cabang, 
-                        CASE 
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                            ELSE '>H+7'
-                        END AS aging_group, AWB
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                ) sub GROUP BY Cabang, aging_group
+                SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
+                FROM v_inbound
+                {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                GROUP BY Cabang, wus_aging_group
             """).fetchdf()
       render_plotly_table_matrix(
           df_succ,
-          "Matrix_Success_UnHRS_Cabang.csv",
-          "📥 Download Data Matrix Success UnHRS (CSV)",
+          "Matrix_Success_WUS_Cabang.csv",
+          "📥 Download Data Matrix Success WUS (CSV)",
       )
 
       st.markdown("---")
 
       st.subheader(
-          "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging"
+          "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging WUS vs"
           " TGL_UPDATE_STATUS_POD)"
       )
       df_undel = conn.execute(f"""
-                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
-                FROM (
-                    SELECT Cabang, 
-                        CASE 
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                            ELSE '>H+7'
-                        END AS aging_group, AWB
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    {where_sql} AND Status_Shipment = 'UNDELIVERY'
-                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                ) sub GROUP BY Cabang, aging_group
+                SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
+                FROM v_inbound
+                {where_sql} AND Status_Shipment = 'UNDELIVERY'
+                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                GROUP BY Cabang, wus_aging_group
             """).fetchdf()
       render_plotly_table_matrix(
           df_undel,
-          "Matrix_Undel_UnHRS_Cabang.csv",
-          "📥 Download Data Matrix Undel UnHRS (CSV)",
+          "Matrix_Undel_WUS_Cabang.csv",
+          "📥 Download Data Matrix Undel WUS (CSV)",
       )
 
     else:
       st.warning(
           "🔒 Halaman Summary Exec Terkunci. Masukkan password **MXG125** pada"
           " sidebar di sebelah kiri untuk membuka laporan."
-      )
-
-  # =========================================================
-  # TAB 3: MAP UNRUNSHEET
-  # =========================================================
-  with tab3:
-    st.subheader(
-        "📍 Peta Interaktif Sebaran UnRunsheet per Kecamatan (Malang Raya &"
-        " Blitar Raya)"
-    )
-    st.caption(
-        "Visualisasi titik koordinat wilayah kecamatan UnRunsheet yang"
-        " dioptimalkan agar cepat termuat."
-    )
-
-    df_map_raw = conn.execute(f"""
-            SELECT UPPER(TRIM(Kecamatan)) AS Kecamatan, COUNT(DISTINCT AWB) AS total_unrun
-            FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
-              AND Kecamatan IS NOT NULL
-            GROUP BY 1
-            ORDER BY total_unrun DESC
-        """).fetchdf()
-
-    if not df_map_raw.empty:
-      coords_map = {
-          "MALANG": [-7.9666, 112.6326],
-          "KEPANJEN": [-8.1308, 112.5693],
-          "BATU": [-7.8767, 112.5234],
-          "BLITAR": [-8.0954, 112.1627],
-          "TUREN": [-8.1691, 112.6953],
-          "BULULAWANG": [-8.0475, 112.6394],
-          "BLIMBING": [-7.9546, 112.6481],
-          "LOWOKWARU": [-7.9463, 112.6155],
-          "KLOJEN": [-7.9785, 112.6316],
-          "SUKUN": [-8.0003, 112.6183],
-          "KEDUNGKANDANG": [-7.9942, 112.6568],
-          "PAKIS": [-7.9528, 112.6931],
-          "DAMPIT": [-8.2323, 112.7486],
-      }
-
-      lat_list, lon_list, size_list = [], [], []
-      for idx, row in df_map_raw.iterrows():
-        kec = row["Kecamatan"]
-        if kec in coords_map:
-          lat_list.append(coords_map[kec][0])
-          lon_list.append(coords_map[kec][1])
-        else:
-          lat_list.append(-7.9839 + (((idx * 3) % 15) * 0.012))
-          lon_list.append(112.6214 + (((idx * 3) % 15) * 0.012))
-
-        size_list.append(max(float(row["total_unrun"]) * 8, 2500))
-
-      df_map_raw["lat"] = lat_list
-      df_map_raw["lon"] = lon_list
-      df_map_raw["radius"] = size_list
-
-      layer = pdk.Layer(
-          "ScatterplotLayer",
-          data=df_map_raw,
-          get_position=["lon", "lat"],
-          get_color=[220, 53, 69, 190],
-          get_radius="radius",
-          pickable=True,
-          auto_highlight=True,
-      )
-
-      view_state = pdk.ViewState(
-          latitude=-7.9839, longitude=112.6214, zoom=10.5, pitch=25
-      )
-
-      r = pdk.Deck(
-          layers=[layer],
-          initial_view_state=view_state,
-          tooltip={
-              "html": "<b>Kecamatan:</b> {Kecamatan}<br/><b>Total UnRunsheet:</b> {total_unrun}",
-              "style": {
-                  "backgroundColor": "#1f2937",
-                  "color": "white",
-                  "borderRadius": "6px",
-                  "padding": "8px",
-              },
-          },
-          map_style="mapbox://styles/mapbox/dark-v10",
-      )
-
-      st.pydeck_chart(r, use_container_width=True)
-
-      st.markdown("### 📋 Rangkuman Data UnRunsheet per Kecamatan")
-      st.dataframe(
-          df_map_raw[["Kecamatan", "total_unrun"]],
-          use_container_width=True,
-          height=300,
-      )
-    else:
-      st.info(
-          "Tidak ada data geolokasi UnRunsheet untuk ditampilkan berdasarkan"
-          " filter aktif."
       )
 
 except Exception as main_err:
