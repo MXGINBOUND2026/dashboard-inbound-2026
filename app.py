@@ -106,7 +106,9 @@ try:
   ).fetchdf()["column_name"].tolist()
 
   wus_col_expr = (
-      "WUS_DATE" if "WUS_DATE" in parquet_columns else "CAST(NULL AS TIMESTAMP) AS WUS_DATE"
+      "WUS_DATE"
+      if "WUS_DATE" in parquet_columns
+      else "CAST(NULL AS TIMESTAMP) AS WUS_DATE"
   )
   bil_col_expr = (
       "BILNOTE_AMOUNT"
@@ -124,7 +126,16 @@ try:
       else "CAST(NULL AS VARCHAR) AS TGL_RECEIVED"
   )
   coding_col_expr = (
-      "CODING" if "CODING" in parquet_columns else "CAST(NULL AS VARCHAR) AS CODING"
+      """
+        CASE 
+            WHEN CODING IS NULL OR CAST(CODING AS VARCHAR) = '' OR CAST(CODING AS VARCHAR) = '-' THEN '-'
+            WHEN UPPER(CAST(CODING AS VARCHAR)) LIKE 'D%' THEN UPPER(CAST(CODING AS VARCHAR))
+            WHEN TRY_CAST(CODING AS INTEGER) IS NOT NULL THEN 'D' || LPAD(CAST(CODING AS VARCHAR), 2, '0')
+            ELSE CAST(CODING AS VARCHAR)
+        END AS CODING
+    """
+      if "CODING" in parquet_columns
+      else "CAST('-' AS VARCHAR) AS CODING"
   )
 
   conn.execute(f"""
@@ -706,60 +717,77 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-      def get_kpi_metrics(status_filter_sql, zona_filter_sql, aging_target_val):
+      def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
+        # 1. Total Akumulasi Keseluruhan untuk Nilai Kartu Utama
+        all_df = conn.execute(f"""
+                    SELECT 
+                        COUNT(DISTINCT AWB) as total_awb,
+                        COUNT(DISTINCT CASE WHEN wus_aging_group = '{target_aging_code}' THEN AWB END) as target_awb
+                    FROM v_inbound {where_sql}
+                    AND {status_filter_sql}
+                    AND {zona_filter_sql}
+                """).fetchdf()
+
+        tot_all = all_df["total_awb"][0] or 0
+        tgt_all = all_df["target_awb"][0] or 0
+        pct_all = (tgt_all / tot_all * 100.0) if tot_all > 0 else 0.0
+
+        # 2. Minggu Ini (7 Hari Terakhir)
         curr_df = conn.execute(f"""
                     SELECT 
-                        COUNT(DISTINCT AWB) as total_awb,
-                        COUNT(DISTINCT CASE WHEN {aging_target_val} THEN AWB END) as target_awb
-                    FROM v_inbound {where_sql} 
-                    AND {status_filter_sql} 
+                        COUNT(DISTINCT AWB) as total_kiriman,
+                        COUNT(DISTINCT CASE WHEN wus_aging_group = '{target_aging_code}' THEN AWB END) as total_target
+                    FROM v_inbound {where_sql}
+                    AND {status_filter_sql}
                     AND {zona_filter_sql}
+                    AND CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) >= CURRENT_DATE - INTERVAL 7 DAY
                 """).fetchdf()
 
-        tot = curr_df["total_awb"][0] or 0
-        tgt = curr_df["target_awb"][0] or 0
-        pct = (tgt / tot * 100.0) if tot > 0 else 0.0
+        curr_tot = curr_df["total_kiriman"][0] or 0
+        curr_tgt = curr_df["total_target"][0] or 0
+        curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
+        # 3. Minggu Lalu (14 s/d 7 Hari Lalu)
         prev_df = conn.execute(f"""
                     SELECT 
-                        COUNT(DISTINCT AWB) as total_awb,
-                        COUNT(DISTINCT CASE WHEN {aging_target_val} THEN AWB END) as target_awb
-                    FROM v_inbound {where_sql} 
-                    AND {status_filter_sql} 
+                        COUNT(DISTINCT AWB) as total_kiriman,
+                        COUNT(DISTINCT CASE WHEN wus_aging_group = '{target_aging_code}' THEN AWB END) as total_target
+                    FROM v_inbound {where_sql}
+                    AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE) >= CURRENT_DATE - INTERVAL 14 DAY
-                    AND CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE) < CURRENT_DATE - INTERVAL 7 DAY
+                    AND CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) >= CURRENT_DATE - INTERVAL 14 DAY
+                    AND CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) < CURRENT_DATE - INTERVAL 7 DAY
                 """).fetchdf()
 
-        p_tot = prev_df["total_awb"][0] or 0
-        p_tgt = prev_df["target_awb"][0] or 0
-        p_pct = (p_tgt / p_tot * 100.0) if p_tot > 0 else 0.0
+        prev_tot = prev_df["total_kiriman"][0] or 0
+        prev_tgt = prev_df["total_target"][0] or 0
+        prev_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
 
-        wow_diff = pct - p_pct
-        return tgt, pct, wow_diff
+        wow_diff = curr_pct - prev_pct
+        return tot_all, pct_all, wow_diff
 
       succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
-          aging_target_val="wus_aging_group = 'H+0'",
+          target_aging_code="H+0",
       )
 
       succ_c_vol, succ_c_pct, succ_c_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
-          aging_target_val="wus_aging_group = 'H+1'",
+          target_aging_code="H+1",
       )
 
       undel_ab_vol, undel_ab_pct, undel_ab_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
-          aging_target_val="wus_aging_group = 'H+0'",
+          target_aging_code="H+0",
       )
 
       undel_c_vol, undel_c_pct, undel_c_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
-          aging_target_val="wus_aging_group = 'H+1'",
+          target_aging_code="H+1",
       )
 
       k1, k2, k3, k4 = st.columns(4)
