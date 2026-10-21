@@ -215,6 +215,8 @@ query_duckdb = f"""
                 main.TGL_RECEIVED,
                 main.TGL_TARIK_REPORT,
                 main.TGL_UPDATE_STATUS_POD,
+                main.WUS_DATE,
+                main.BILNOTE_AMOUNT,
                 ref.POD_Category AS raw_pod_category,
                 ref.POD_DESC
             FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
@@ -234,6 +236,7 @@ query_duckdb = f"""
                 COALESCE(TRY_STRPTIME(TGL_RECEIVED, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_RECEIVED AS TIMESTAMP)) AS dt_tgl_rec,
                 COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_ob,
                 COALESCE(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_UPDATE_STATUS_POD AS TIMESTAMP)) AS dt_update_pod,
+                COALESCE(TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(WUS_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(WUS_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(WUS_DATE AS TIMESTAMP)) AS dt_wus,
                 
                 CASE 
                     WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-') 
@@ -307,7 +310,7 @@ query_duckdb = f"""
                                  OR
                                  (dt_hvi IS NOT NULL AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%')
                              )
-                         )
+                         ) 
                     THEN 'UnInbound'
                     WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' 
                          AND (MANIFEST_INBOUND_SUBAGEN_NO IS NULL OR TRIM(CAST(MANIFEST_INBOUND_SUBAGEN_NO AS VARCHAR)) = '' OR MANIFEST_INBOUND_SUBAGEN_NO = '-') 
@@ -354,7 +357,14 @@ query_duckdb = f"""
             COALESCE(w.SERVICE, '-') AS SERVICE,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
             w.valid_inbound_date AS Last_Inbound,
-            w.dt_update_pod AS TGL_UPDATE_POD,
+            w.dt_update_pod AS TGL_UPDATE_STATUS_POD,
+            w.dt_wus AS WUS_DATE,
+            w.BILNOTE_AMOUNT AS BILNOTE_AMOUNT,
+            CASE 
+                WHEN w.BILNOTE_AMOUNT IS NOT NULL AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '' AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '0' 
+                THEN 'COD' 
+                ELSE 'Non COD' 
+            END AS payment_type,
             w.dt_im AS dt_im,
             w.dt_hvi AS dt_hvi,
             w.HVI_NO AS HVI_NO,
