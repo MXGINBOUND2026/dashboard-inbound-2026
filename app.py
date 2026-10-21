@@ -747,7 +747,7 @@ try:
 
       st.markdown("---")
 
-      # FUNGSI RENDER PLOTLY TABLE (WARNA BACKGROUND SEL + TOMBOL CAPTURE FOTO + DOWNLOAD CSV)
+      # FUNGSI RENDER PLOTLY TABLE DENGAN URUTAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK DI ATAS
       def render_plotly_table_matrix(df_raw, csv_filename, download_label):
         if df_raw.empty:
           st.info("Tidak ada data.")
@@ -764,6 +764,9 @@ try:
         pivot = pivot[AGING_ORDER]
         pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
 
+        # URUTKAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK (DESCENDING)
+        pivot = pivot.sort_values(by="Grand Total", ascending=False)
+
         grand_total_row = pivot.sum(axis=0)
         grand_total_row.name = "Grand Total"
 
@@ -774,7 +777,6 @@ try:
 
         headers = list(pivot_with_total.columns)
 
-        # SUSUN TEXT NILAI SEL
         cell_values = []
         for col in headers:
           if col == "Cabang":
@@ -784,7 +786,6 @@ try:
                 f"{int(val):,}" for val in pivot_with_total[col].tolist()
             ])
 
-        # SUSUN WARNA SEL BERDASARKAN THRESHOLD AGING
         cell_colors = []
         n_rows = len(pivot_with_total)
 
@@ -792,8 +793,7 @@ try:
           col_color_list = []
           for row_idx in range(n_rows):
             if row_idx == n_rows - 1:
-              # Baris Grand Total (Hitam Pekat)
-              col_color_list.append("#222222")
+              col_color_list.append("#222222")  # Baris Grand Total (Hitam)
             elif col == "Cabang" or col == "Grand Total":
               col_color_list.append("#2a2a2a")
             else:
@@ -814,7 +814,6 @@ try:
                 col_color_list.append("#1e1e1e")
           cell_colors.append(col_color_list)
 
-        # SUSUN WARNA TEKS
         font_colors = []
         for col in headers:
           col_font_list = []
