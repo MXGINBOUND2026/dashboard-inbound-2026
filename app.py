@@ -99,7 +99,6 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 try:
   conn = duckdb.connect()
 
-  # 4 Tab Navigasi Utama (Termasuk Tab Map UnRunsheet)
   tab1, tab2, tab3 = st.tabs(
       ["📊 Main Dashboard", "🔒 Summary Exec", "📍 Map UnRunsheet"]
   )
@@ -900,7 +899,7 @@ try:
                 GROUP BY Cabang, aging_group
             """).fetchdf()
       render_plotly_table_matrix(
-          df_run,
+          df_unrun,
           "Matrix_UnRunsheet_Cabang.csv",
           "📥 Download Data Matrix UnRunsheet (CSV)",
       )
@@ -978,7 +977,7 @@ try:
       )
 
   # =========================================================
-  # TAB 3: MAP UNRUNSHEET (KAB/KOTA MALANG & BLITAR & BATU)
+  # TAB 3: MAP UNRUNSHEET
   # =========================================================
   with tab3:
     st.subheader(
@@ -990,9 +989,8 @@ try:
         " koordinat kecamatan."
     )
 
-    # Ambil data kecamatan unrunsheet beserta perkiraan koordinat statis/dinamis ringan
     df_map_raw = conn.execute(f"""
-            iran = SELECT Kecamatan, COUNT(DISTINCT AWB) AS total_unrun
+            SELECT Kecamatan, COUNT(DISTINCT AWB) AS total_unrun
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
               AND Kecamatan IS NOT NULL
@@ -1000,8 +998,6 @@ try:
         """).fetchdf()
 
     if not df_map_raw.empty:
-      # Mapping koordinat dummy/aktual ringan untuk wilayah Malang Raya & Blitar Raya
-      # (Mencegah beban berat geodata/geojson, menggunakan koordinat titik kecamatan yang efisien)
       coords_map = {
           "MALANG": [-7.9666, 112.6326],
           "KEPANJEN": [-8.1308, 112.5693],
@@ -1019,31 +1015,27 @@ try:
       lat_list, lon_list, size_list = [], [], []
       for idx, row in df_map_raw.iterrows():
         kec = str(row["Kecamatan"]).upper().strip()
-        # Default koordinat Malang jika kecamatan tidak ter-mapping spesifik
         lat_lon = coords_map.get(
             kec, [-7.9839 + (idx * 0.01), 112.6214 + (idx * 0.01)]
         )
         lat_list.append(lat_lon[0])
         lon_list.append(lat_lon[1])
-        # Skala ukuran radius titik peta proporsional
         size_list.append(max(float(row["total_unrun"]) * 3, 500))
 
       df_map_raw["lat"] = lat_list
       df_map_raw["lon"] = lon_list
       df_map_raw["radius"] = size_list
 
-      # Render PyDeck Map yang sangat ringan di RAM
       layer = pdk.Layer(
           "ScatterplotLayer",
           data=df_map_raw,
           get_position=["lon", "lat"],
-          get_color=[220, 53, 69, 160],  # Warna merah transparan (Alert UnRunsheet)
+          get_color=[220, 53, 69, 160],
           get_radius="radius",
           pickable=True,
           auto_highlight=True,
       )
 
-      # Titik Center Malang Raya
       view_state = pdk.ViewState(
           latitude=-7.9666, longitude=112.6326, zoom=10, pitch=30
       )
@@ -1059,8 +1051,9 @@ try:
       )
 
       st.pydeck_chart(r)
-
-      st.dataframe(df_map_raw[["Kecamatan", "total_unrun"]], use_container_width=True)
+      st.dataframe(
+          df_map_raw[["Kecamatan", "total_unrun"]], use_container_width=True
+      )
     else:
       st.info("Tidak ada data geolokasi UnRunsheet untuk ditampilkan.")
 
