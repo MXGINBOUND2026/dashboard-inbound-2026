@@ -250,7 +250,7 @@ try:
   if "active_view" not in st.session_state:
     st.session_state.active_view = "UnRunsheet"
 
-  # Metric Cards (Kartu 4 diganti menjadi UnRunsheet with PRA)
+  # Metric Cards (4 Utama)
   metrics_res = conn.execute(f"""
         SELECT 
             COUNT(DISTINCT AWB) AS total_awb,
@@ -297,6 +297,107 @@ try:
       st.rerun()
 
   st.markdown("---")
+
+  # =========================================================
+  # METRIC CARDS TAMBAHAN (Success UnHRS & Undel UnHRS)
+  # =========================================================
+  metrics_custom = conn.execute(f"""
+        SELECT 
+            COUNT(DISTINCT CASE 
+                WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
+                     AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) 
+                THEN AWB END) AS total_success_unhrs,
+            COUNT(DISTINCT CASE 
+                WHEN Status_Shipment = 'UNDELIVERY' 
+                     AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) 
+                THEN AWB END) AS total_undel_unhrs
+        FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
+    """).fetchdf()
+
+  total_success_unhrs = metrics_custom["total_success_unhrs"][0] or 0
+  total_undel_unhrs = metrics_custom["total_undel_unhrs"][0] or 0
+
+  if "active_card_filter" not in st.session_state:
+    st.session_state.active_card_filter = None
+
+  col_m1, col_m2 = st.columns(2)
+  with col_m1:
+    st.metric(label="✅ Success UnHRS", value=f"{total_success_unhrs:,}")
+    if st.button(
+        "📋 Lihat Detail Success UnHRS",
+        key="btn_success_unhrs",
+        use_container_width=True,
+    ):
+      st.session_state.active_card_filter = "Success UnHRS"
+      st.rerun()
+  with col_m2:
+    st.metric(label="❌ Undel UnHRS", value=f"{total_undel_unhrs:,}")
+    if st.button(
+        "📋 Lihat Detail Undel UnHRS",
+        key="btn_undel_unhrs",
+        use_container_width=True,
+    ):
+      st.session_state.active_card_filter = "Undel UnHRS"
+      st.rerun()
+
+  if st.session_state.active_card_filter:
+    if st.button(
+        f"🔄 Reset Filter Card [{st.session_state.active_card_filter}]"
+    ):
+      st.session_state.active_card_filter = None
+      st.rerun()
+
+  st.markdown("---")
+
+  # =========================================================
+  # TABEL DETAIL BERDASARKAN KLIK CARD KUSTOM
+  # =========================================================
+  if st.session_state.active_card_filter:
+    card_title = st.session_state.active_card_filter
+    st.subheader(
+        f"📋 Tabel Detail AWB — Berdasarkan Card Klik: [{card_title}]"
+    )
+
+    if card_title == "Success UnHRS":
+      card_query_filter = """
+                Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
+                AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+            """
+    else:
+      card_query_filter = """
+                Status_Shipment = 'UNDELIVERY' 
+                AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+            """
+
+    df_card_detail = conn.execute(f"""
+            SELECT AWB, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, WUS_REMARKS
+            FROM read_parquet('{LOCAL_PARQUET_PATH}')
+            {where_sql} AND {card_query_filter}
+            ORDER BY age_days DESC
+            LIMIT 1000
+        """).fetchdf()
+
+    if not df_card_detail.empty:
+      st.caption(
+          f"Total AWB Ditampilkan: **{len(df_card_detail):,}** (Maksimal 1.000"
+          " baris)"
+      )
+      st.dataframe(df_card_detail, use_container_width=True, height=400)
+
+      csv_card = df_card_detail.to_csv(index=False).encode("utf-8")
+      st.download_button(
+          label=f"📥 Download Data Detail [{card_title}] (CSV)",
+          data=csv_card,
+          file_name=f"Detail_Card_{card_title.replace(' ', '_')}.csv",
+          mime="text/csv",
+      )
+    else:
+      st.info(
+          f"Tidak ada data AWB yang cocok untuk kategori [{card_title}] dengan"
+          " filter aktif."
+      )
+
+    st.markdown("---")
 
   view_choice = st.radio(
       "📌 Pilih Tampilan Data Dashboard:",
