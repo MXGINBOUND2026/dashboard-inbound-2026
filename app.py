@@ -1,3 +1,4 @@
+import datetime
 import io
 import os
 import duckdb
@@ -103,6 +104,33 @@ try:
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
 
+  # 1. Filter Range Tanggal Last_Inbound
+  min_max_date = conn.execute(f"""
+        SELECT 
+            MIN(CAST(Last_Inbound AS DATE)) as min_d, 
+            MAX(CAST(Last_Inbound AS DATE)) as max_d 
+        FROM read_parquet('{LOCAL_PARQUET_PATH}')
+        WHERE Last_Inbound IS NOT NULL
+    """).fetchdf()
+
+  default_start = (
+      min_max_date["min_d"][0]
+      if not min_max_date.empty and pd.notnull(min_max_date["min_d"][0])
+      else datetime.date(2026, 1, 1)
+  )
+  default_end = (
+      min_max_date["max_d"][0]
+      if not min_max_date.empty and pd.notnull(min_max_date["max_d"][0])
+      else datetime.date.today()
+  )
+
+  date_range = st.sidebar.date_input(
+      "📅 Range Tanggal Last Inbound:",
+      value=(default_start, default_end),
+      min_value=default_start,
+      max_value=default_end,
+  )
+
   unique_locations = [
       r[0]
       for r in conn.execute(
@@ -157,6 +185,14 @@ try:
   )
 
   where_clauses = []
+
+  # Penerapan Filter Range Tanggal Last_Inbound
+  if isinstance(date_range, tuple) and len(date_range) == 2:
+    start_d, end_d = date_range
+    where_clauses.append(
+        f"CAST(Last_Inbound AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
+    )
+
   if chosen_loc != "Semua Last Location":
     where_clauses.append(f"LAST_LOCATION = '{chosen_loc}'")
   if chosen_cabang != "Semua Cabang":
@@ -197,6 +233,7 @@ try:
   top_kec_df = conn.execute(f"""
         SELECT Kecamatan, COUNT(DISTINCT AWB) as total 
         FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql} 
+        AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)')
         GROUP BY Kecamatan ORDER BY total DESC LIMIT 5
     """).fetchdf()
 
@@ -277,10 +314,18 @@ try:
         " Ini)"
     )
 
+    # Filter khusus UnRunsheet jika Sidebar Status tidak dispesifikasikan
+    unrunsheet_status_clause = (
+        ""
+        if chosen_status != "Semua Status"
+        else "AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA',"
+        " 'Unrunsheet AU (HOC)')"
+    )
+
     df_aging = conn.execute(f"""
             SELECT aging_group, COUNT(DISTINCT AWB) AS total_awb
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)')
+            {where_sql} {unrunsheet_status_clause}
             GROUP BY 1
             ORDER BY 
                 CASE aging_group
@@ -380,7 +425,7 @@ try:
             PIVOT (
                 SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)') {aging_clause}
+                {where_sql} {unrunsheet_status_clause} {aging_clause}
             )
             ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
             USING COUNT(DISTINCT AWB)
@@ -407,63 +452,12 @@ try:
     df_detail = conn.execute(f"""
             SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, POD_Category, POD_DESC, WUS_REMARKS
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA', 'Unrunsheet AU (HOC)') {aging_clause}
+            {where_sql} {unrunsheet_status_clause} {aging_clause}
             ORDER BY age_days DESC
             LIMIT 1000
         """).fetchdf()
 
     st.dataframe(df_detail, use_container_width=True)
-
-    # Tabel Detail per Status Shipment
-    st.markdown("---")
-    st.subheader(
-        f"📋 Detail AWB Berdasarkan Status Shipment — [{chosen_status}]"
-    )
-
-    status_detail_clause = ""
-    if chosen_status != "Semua Status":
-      status_detail_clause = f"AND Status_Shipment = '{chosen_status}'"
-
-    df_status_detail = conn.execute(f"""
-        SELECT 
-            AWB, 
-            SERVICE, 
-            Status_Shipment, 
-            POD_Category, 
-            POD_DESC, 
-            Last_Inbound, 
-            age_days AS "Aging (Hari)", 
-            aging_group AS "Kategori Aging", 
-            LAST_LOCATION, 
-            Cabang, 
-            Zona, 
-            Kecamatan, 
-            WUS_REMARKS
-        FROM read_parquet('{LOCAL_PARQUET_PATH}')
-        {where_sql} {aging_clause} {status_detail_clause}
-        ORDER BY age_days DESC
-        LIMIT 1000
-    """).fetchdf()
-
-    if not df_status_detail.empty:
-      st.caption(
-          f"Total AWB Ditampilkan: **{len(df_status_detail):,}** (Maksimal 1.000"
-          " baris)"
-      )
-      st.dataframe(df_status_detail, use_container_width=True, height=400)
-
-      csv_status = df_status_detail.to_csv(index=False).encode("utf-8")
-      st.download_button(
-          label=f"📥 Download Data Detail Status [{chosen_status}] (CSV)",
-          data=csv_status,
-          file_name=f"Detail_AWB_Status_{chosen_status.replace(' ', '_')}.csv",
-          mime="text/csv",
-      )
-    else:
-      st.info(
-          "Tidak ada data AWB yang cocok dengan kombinasi filter Status"
-          " Shipment & Aging yang dipilih."
-      )
 
   else:
     st.subheader(
