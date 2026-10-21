@@ -257,6 +257,8 @@ try:
 
   if "active_view" not in st.session_state:
     st.session_state.active_view = "UnRunsheet"
+  if "active_card_filter" not in st.session_state:
+    st.session_state.active_card_filter = None
 
   # Metric Cards (4 Utama)
   metrics_res = conn.execute(f"""
@@ -282,6 +284,7 @@ try:
         "👉 Lihat Data UnInbound", key="btn_uninbound", use_container_width=True
     ):
       st.session_state.active_view = "UnInbound"
+      st.session_state.active_card_filter = "UnInbound"
       st.rerun()
   with c3:
     st.metric(label="🚨 Alert: Total UnRunsheet", value=f"{total_unrunsheet:,}")
@@ -291,6 +294,7 @@ try:
         use_container_width=True,
     ):
       st.session_state.active_view = "UnRunsheet"
+      st.session_state.active_card_filter = "Total UnRunsheet"
       st.rerun()
   with c4:
     st.metric(
@@ -302,6 +306,7 @@ try:
         use_container_width=True,
     ):
       st.session_state.active_view = "UnRunsheet PRA"
+      st.session_state.active_card_filter = "UnRunsheet with PRA"
       st.rerun()
 
   st.markdown("---")
@@ -325,9 +330,6 @@ try:
   total_success_unhrs = metrics_custom["total_success_unhrs"][0] or 0
   total_undel_unhrs = metrics_custom["total_undel_unhrs"][0] or 0
 
-  if "active_card_filter" not in st.session_state:
-    st.session_state.active_card_filter = None
-
   col_m1, col_m2 = st.columns(2)
   with col_m1:
     st.metric(label="⚠️ Success UnHRS", value=f"{total_success_unhrs:,}")
@@ -348,6 +350,7 @@ try:
       st.session_state.active_card_filter = "Undel UnHRS"
       st.rerun()
 
+  # Tombol Reset Filter Card jika sedang ada card yang diklik
   if st.session_state.active_card_filter:
     if st.button(
         f"🔄 Reset Filter Card [{st.session_state.active_card_filter}]"
@@ -358,12 +361,12 @@ try:
   st.markdown("---")
 
   # =========================================================
-  # TABEL DETAIL BERDASARKAN KLIK CARD KUSTOM
+  # TABEL DETAIL BERDASARKAN KLIK METRIC CARD APAPUN
   # =========================================================
   if st.session_state.active_card_filter:
     card_title = st.session_state.active_card_filter
     st.subheader(
-        f"📋 Tabel Detail AWB — Berdasarkan Card Klik: [{card_title}]"
+        f"📋 Tabel Detail AWB — Berdasarkan Klik Card: [{card_title}]"
     )
 
     if card_title == "Success UnHRS":
@@ -371,14 +374,24 @@ try:
                 Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
                 AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
             """
-    else:
+    elif card_title == "Undel UnHRS":
       card_query_filter = """
                 Status_Shipment = 'UNDELIVERY' 
                 AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
             """
+    elif card_title == "Total UnRunsheet":
+      card_query_filter = (
+          "Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
+      )
+    elif card_title == "UnRunsheet with PRA":
+      card_query_filter = "Status_Shipment = 'UnRunsheet with PRA'"
+    elif card_title == "UnInbound":
+      card_query_filter = "Status_Shipment = 'UnInbound'"
+    else:
+      card_query_filter = "1=1"
 
     df_card_detail = conn.execute(f"""
-            SELECT AWB, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, WUS_REMARKS
+            SELECT AWB, Last_Inbound, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
             {where_sql} AND {card_query_filter}
             ORDER BY age_days DESC
@@ -407,6 +420,9 @@ try:
 
     st.markdown("---")
 
+  # =========================================================
+  # DASHBOARD UTAMA
+  # =========================================================
   view_choice = st.radio(
       "📌 Pilih Tampilan Data Dashboard:",
       ["📊 Analisis UnRunsheet", "⚠️ Tabel UnInbound"],
