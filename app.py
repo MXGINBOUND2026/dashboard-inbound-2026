@@ -149,7 +149,6 @@ try:
       ).fetchall()
   ]
 
-  # Batasi Cabang sesuai permintaan
   allowed_cabang_list = [
       "Malang",
       "Batu",
@@ -639,13 +638,12 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC (TERHUBUNG KE FILTER GLOBAL SIDEBAR)
+  # TAB 2: SUMMARY EXEC
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
       st.title("📊 Executive Summary & Performance Analytics")
 
-      # KPI Summary Cards (Kini terhubung dengan where_sql dari sidebar)
       kpi_data = conn.execute(f"""
                 SELECT 
                     COUNT(DISTINCT AWB) as total_ytd,
@@ -664,7 +662,6 @@ try:
       with k1:
         st.metric(
             label="📦 Total Inbound YTD",
-       [cite: 15]
             value=f"{t_ytd:,}",
             delta="Filtered",
         )
@@ -1039,7 +1036,7 @@ try:
       )
 
   # =========================================================
-  # TAB 3: MAP UNRUNSHEET (DIPERBAIKI AGAR TAMPIL & RINGAN)
+  # TAB 3: MAP UNRUNSHEET
   # =========================================================
   with tab3:
     st.subheader(
@@ -1084,13 +1081,10 @@ try:
           lat_list.append(coords_map[kec][0])
           lon_list.append(coords_map[kec][1])
         else:
-          # Memberikan sebaran koordinat titik grid terpusat yang rapi di wilayah Malang Raya jika nama kecamatan tidak ada di kamus
           lat_list.append(-7.9839 + (((idx * 3) % 15) * 0.012))
           lon_list.append(112.6214 + (((idx * 3) % 15) * 0.012))
 
-        size_list.append(
-            max(float(row["total_unrun"]) * 8, 2500)
-        )  # Ukuran radius disesuaikan agar proporsional
+        size_list.append(max(float(row["total_unrun"]) * 8, 2500))
 
       df_map_raw["lat"] = lat_list
       df_map_raw["lon"] = lon_list
