@@ -110,12 +110,19 @@ try:
       else datetime.date.today()
   )
 
-  date_range = st.sidebar.date_input(
-      "📅 Range Tanggal Last Inbound:",
-      value=(default_start, default_end),
-      min_value=default_start,
-      max_value=default_end,
+  # Checkbox untuk mengaktifkan/menonaktifkan filter tanggal (agar UnInbound bisa tercapture tanpa batasan tanggal)
+  use_date_filter = st.sidebar.checkbox(
+      "📅 Aktifkan Filter Tanggal Last Inbound", value=False
   )
+
+  date_range = None
+  if use_date_filter:
+    date_range = st.sidebar.date_input(
+        "Pilih Rentang Tanggal:",
+        value=(default_start, default_end),
+        min_value=default_start,
+        max_value=default_end,
+    )
 
   unique_locations = [
       r[0]
@@ -161,44 +168,45 @@ try:
       ).fetchall()
   ]
 
-  chosen_loc = st.sidebar.selectbox(
-      "🔍 Filter Last Location:", ["Semua Last Location"] + unique_locations
+  # Mengubah filter menjadi Multiselect
+  chosen_loc = st.sidebar.multiselect(
+      "🔍 Filter Last Location:", unique_locations
   )
-  chosen_cabang = st.sidebar.selectbox(
-      "🏢 Filter Cabang:", ["Semua Cabang"] + unique_cabang
+  chosen_cabang = st.sidebar.multiselect("🏢 Filter Cabang:", unique_cabang)
+  chosen_zona = st.sidebar.multiselect("⚡ Filter Zona (QCE):", unique_zona)
+  chosen_kecamatan = st.sidebar.multiselect(
+      "📍 Filter Kecamatan:", unique_kecamatan
   )
-  chosen_zona = st.sidebar.selectbox(
-      "⚡ Filter Zona (QCE):", ["Semua Zona"] + unique_zona
+  chosen_status = st.sidebar.multiselect(
+      "📦 Filter Shipment Status:", unique_status
   )
-  chosen_kecamatan = st.sidebar.selectbox(
-      "📍 Filter Kecamatan:", ["Semua Kecamatan"] + unique_kecamatan
-  )
-  chosen_status = st.sidebar.selectbox(
-      "📦 Filter Shipment Status:", ["Semua Status"] + unique_status
-  )
-  chosen_hrs = st.sidebar.selectbox(
-      "📋 Filter Status HRS:", ["Semua Status HRS"] + unique_hrs
-  )
+  chosen_hrs = st.sidebar.multiselect("📋 Filter Status HRS:", unique_hrs)
 
   where_clauses = []
-  if isinstance(date_range, tuple) and len(date_range) == 2:
+  if use_date_filter and isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
     where_clauses.append(
         f"CAST(Last_Inbound AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
     )
 
-  if chosen_loc != "Semua Last Location":
-    where_clauses.append(f"LAST_LOCATION = '{chosen_loc}'")
-  if chosen_cabang != "Semua Cabang":
-    where_clauses.append(f"Cabang = '{chosen_cabang}'")
-  if chosen_zona != "Semua Zona":
-    where_clauses.append(f"Zona = '{chosen_zona}'")
-  if chosen_kecamatan != "Semua Kecamatan":
-    where_clauses.append(f"Kecamatan = '{chosen_kecamatan}'")
-  if chosen_status != "Semua Status":
-    where_clauses.append(f"Status_Shipment = '{chosen_status}'")
-  if chosen_hrs != "Semua Status HRS":
-    where_clauses.append(f"HRS = '{chosen_hrs}'")
+  if chosen_loc:
+    loc_str = "','".join(chosen_loc)
+    where_clauses.append(f"LAST_LOCATION IN ('{loc_str}')")
+  if chosen_cabang:
+    cab_str = "','".join(chosen_cabang)
+    where_clauses.append(f"Cabang IN ('{cab_str}')")
+  if chosen_zona:
+    zon_str = "','".join(chosen_zona)
+    where_clauses.append(f"Zona IN ('{zon_str}')")
+  if chosen_kecamatan:
+    kec_str = "','".join(chosen_kecamatan)
+    where_clauses.append(f"Kecamatan IN ('{kec_str}')")
+  if chosen_status:
+    stat_str = "','".join(chosen_status)
+    where_clauses.append(f"Status_Shipment IN ('{stat_str}')")
+  if chosen_hrs:
+    hrs_str = "','".join(chosen_hrs)
+    where_clauses.append(f"HRS IN ('{hrs_str}')")
 
   where_sql = (
       "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
@@ -414,7 +422,7 @@ try:
 
     unrunsheet_status_clause = (
         ""
-        if chosen_status != "Semua Status"
+        if chosen_status
         else "AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
     )
 
@@ -540,7 +548,7 @@ try:
     else:
       st.info("Tidak ada data Unrunsheet.")
 
-    # Detail Data Table (Lengkap dengan kolom baru HRS)
+    # Detail Data Table
     st.subheader(
         f"📋 Detail AWB — Kategori Aging: [{selected_aging_group}]"
     )
