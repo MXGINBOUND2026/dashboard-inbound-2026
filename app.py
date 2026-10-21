@@ -716,35 +716,23 @@ try:
             "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
             " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b')"
         )
-        sort_expr = (
-            "CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE"
-            " '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)"
-        )
       elif granularity == "Week (Minggu)":
         date_expr = (
             "'Week ' || STRFTIME(COALESCE(dt_im, CASE WHEN"
             " UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL"
             " END), '%W')"
         )
-        sort_expr = (
-            "MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
-            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE))"
-        )
       else:
         date_expr = (
             "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
             " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%B')"
-        )
-        sort_expr = (
-            "MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
-            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE))"
         )
 
       df_inbound_trend = conn.execute(f"""
                 SELECT 
                     {date_expr} AS periode,
                     COUNT(DISTINCT AWB) AS total_awb,
-                    {sort_expr} as sort_key
+                    MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
                 WHERE EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
                   {inbound_date_clause}
