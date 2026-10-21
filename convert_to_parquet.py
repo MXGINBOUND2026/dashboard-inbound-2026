@@ -214,6 +214,7 @@ query_duckdb = f"""
                 main.OUTBOUND_MANIFEST_DATE,
                 main.TGL_RECEIVED,
                 main.TGL_TARIK_REPORT,
+                main.TGL_UPDATE_POD,
                 ref.POD_Category AS raw_pod_category,
                 ref.POD_DESC
             FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
@@ -231,8 +232,9 @@ query_duckdb = f"""
                 COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm,
                 COALESCE(TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)) AS dt_run,
                 COALESCE(TRY_STRPTIME(TGL_RECEIVED, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_RECEIVED AS TIMESTAMP)) AS dt_tgl_rec,
+                COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_ob,
+                COALESCE(TRY_STRPTIME(TGL_UPDATE_POD, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_UPDATE_POD, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_UPDATE_POD, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_UPDATE_POD AS TIMESTAMP)) AS dt_update_pod,
                 
-                -- ATURAN KATEGORI RETURN MUTLAK JIKA TERDAPAT CONNOTE RETURN
                 CASE 
                     WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-') 
                          OR 
@@ -265,7 +267,8 @@ query_duckdb = f"""
                     CASE WHEN UPPER(COALESCE(MANIFEST_INBOUND_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mti ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' THEN dt_mts ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END
-                ) AS valid_inbound_date
+                ) AS valid_inbound_date,
+                COALESCE(dt_ob, CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END) AS valid_uninbound_date
             FROM joined_loc j
         ),
         processed AS (
@@ -282,18 +285,10 @@ query_duckdb = f"""
                     ELSE NULL
                 END AS LAST_LOCATION,
                 
-                -- HIRARKI LOGIKA STATUS SHIPMENT TERBARU (TANPA Success UnHRS, Unrunsheet AU, & UnHRS)
                 CASE 
-                    -- 1. AWB Cancel
                     WHEN UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'Y' THEN 'AWB Cancel'
-
-                    -- 2. Kategori POD Resmi Dari Coding.xlsx atau Return
                     WHEN POD_Category IS NOT NULL AND TRIM(CAST(POD_Category AS VARCHAR)) != '' AND POD_Category != '-' THEN POD_Category
-                    
-                    -- 3. UnReceiving
                     WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
-                    
-                    -- 4. UnOutbound (Pengecualian Service CTC)
                     WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
                          AND NOT (
                              UPPER(SERVICE) LIKE '%CTC%' 
@@ -304,8 +299,6 @@ query_duckdb = f"""
                              )
                          ) 
                     THEN 'UnOutbound'
-                    
-                    -- 5. UnInbound (Last_Inbound Kosong, KECUALI CTC)
                     WHEN valid_inbound_date IS NULL
                          AND NOT (
                              UPPER(SERVICE) LIKE '%CTC%' 
@@ -316,35 +309,23 @@ query_duckdb = f"""
                              )
                          )
                     THEN 'UnInbound'
-                    
-                    -- 6. UnMTI
                     WHEN UPPER(COALESCE(MANIFEST_TRANSIT_SUBAGEN_NO, '')) LIKE '%MXG%' 
                          AND (MANIFEST_INBOUND_SUBAGEN_NO IS NULL OR TRIM(CAST(MANIFEST_INBOUND_SUBAGEN_NO AS VARCHAR)) = '' OR MANIFEST_INBOUND_SUBAGEN_NO = '-') 
                     THEN 'UnMTI'
-
-                    -- 7. UnRunsheet with PRA
                     WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
                          AND UPPER(COALESCE(PRA_RUNSHEET_NO, '')) LIKE '%MXG%' 
                     THEN 'UnRunsheet with PRA'
-                    
-                    -- 8. UnRunsheet
                     WHEN DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-' 
                     THEN 'UnRunsheet'
-                    
-                    -- 9. On Delivery Today
                     WHEN DATE_RUNSHEET IS NOT NULL AND CAST(dt_run AS DATE) = CURRENT_DATE 
                          AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
                     THEN 'On Delivery Today'
-                    
-                    -- 10. Open POD
                     WHEN DATE_RUNSHEET IS NOT NULL 
                          AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-') 
                     THEN 'Open POD'
-                    
                     ELSE 'UNKNOWN'
                 END AS Status_Shipment,
 
-                -- LOGIKA KOLOM BARU 'HRS'
                 CASE 
                     WHEN UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HRS%' OR UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HRS%' THEN 'HRS'
                     WHEN UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HRI%' OR UPPER(COALESCE(WUS_REMARKS, '')) LIKE '%HRI%' THEN 'HRI'
@@ -361,11 +342,11 @@ query_duckdb = f"""
                     ELSE '-'
                 END AS HRS,
 
-                -- AGING SHIPMENT
+                -- PENYESUAIAN CALCULATED AGE_DAYS DENGAN PENGAMAN UNINBOUND
                 CASE 
-                    WHEN UPPER(TRIM(COALESCE(POD_Category, ''))) IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND dt_tgl_rec IS NOT NULL 
-                    THEN DATEDIFF('day', valid_inbound_date, dt_tgl_rec)
-                    ELSE DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP)
+                    WHEN valid_inbound_date IS NOT NULL THEN DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP)
+                    WHEN valid_uninbound_date IS NOT NULL THEN DATEDIFF('day', valid_uninbound_date, CURRENT_TIMESTAMP)
+                    ELSE NULL
                 END AS age_days
             FROM calc_inbound c
         )
@@ -374,6 +355,10 @@ query_duckdb = f"""
             COALESCE(w.SERVICE, '-') AS SERVICE,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
             w.valid_inbound_date AS Last_Inbound,
+            w.dt_update_pod AS TGL_UPDATE_POD,
+            w.dt_im AS dt_im,
+            w.dt_hvi AS dt_hvi,
+            w.HVI_NO AS HVI_NO,
             COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
             COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
             COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
@@ -384,6 +369,7 @@ query_duckdb = f"""
             COALESCE(w.POD_Category, '-') AS POD_Category,
             COALESCE(w.POD_DESC, '-') AS POD_DESC,
             CASE 
+                WHEN age_days IS NULL THEN '-'
                 WHEN age_days <= 0 THEN 'H+0'
                 WHEN age_days = 1 THEN 'H+1'
                 WHEN age_days = 2 THEN 'H+2'
