@@ -467,12 +467,12 @@ try:
       )
 
       if card_title == "Success UnHRS":
-        card_query_filter = """
+              card_query_filter = """
                     Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
                     AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 """
-        df_card_detail = conn.execute(f"""
-                    SELECT AWB, LAST_LOCATION AS Last_Location, TGL_RECEIVED, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
+              df_card_detail = conn.execute(f"""
+                    SELECT AWB, LAST_LOCATION AS Last_Location, TGL_UPDATE_STATUS_POD, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
                     FROM v_inbound
                     {where_sql} AND {card_query_filter}
                     LIMIT 1000
