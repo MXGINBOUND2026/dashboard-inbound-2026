@@ -441,7 +441,7 @@ try:
 
     # Detail Data Table (Lengkap dengan kolom baru HRS)
     st.subheader(
-        f"📋 Detail AWB UnRunsheet — Kategori Aging: [{selected_aging_group}]"
+        f"📋 Detail AWB — Kategori Aging: [{selected_aging_group}]"
     )
 
     df_detail = conn.execute(f"""
