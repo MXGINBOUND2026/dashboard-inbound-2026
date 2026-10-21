@@ -654,6 +654,7 @@ try:
 
       st.markdown("---")
 
+      # GRAFIK TOTAL INBOUND TAHUN 2026 (TEMPLATE SESUAI REFERENSI: JUDUL DI TENGAH, AREA CHART, GARIS HALUS)
       st.subheader("📈 1. Grafik Total Inbound Per Tanggal (Tahun 2026)")
 
       col_gran, col_date = st.columns([1, 1])
@@ -732,28 +733,55 @@ try:
             """).fetchdf()
 
       if not df_inbound_trend.empty:
-        fig_inbound = px.line(
-            df_inbound_trend,
-            x="periode",
-            y="total_awb",
-            markers=True,
-            title="Tren Total Inbound AWB (Tahun 2026)",
-            labels={"periode": "Periode Tanggal", "total_awb": "Total AWB"},
+        fig_inbound = go.Figure()
+        fig_inbound.add_trace(
+            go.Scatter(
+                x=df_inbound_trend["periode"],
+                y=df_inbound_trend["total_awb"],
+                mode="lines+markers",
+                fill="tozeroy",
+                line=dict(color="#1f77b4", width=3, shape="spline"),
+                marker=dict(size=6, color="#1f77b4"),
+                fillcolor="rgba(31, 119, 180, 0.3)",
+            )
         )
-        fig_inbound.update_traces(line_color="#1f77b4", line_width=3)
+        fig_inbound.update_layout(
+            title=dict(
+                text="<b>TOTAL INBOUND 2026</b>",
+                x=0.5,
+                xanchor="center",
+                font=dict(size=18, color="#FFFFFF"),
+            ),
+            xaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                tickfont=dict(color="#CCCCCC"),
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.1)",
+                gridwidth=1,
+                griddash="dash",
+                zeroline=False,
+                tickfont=dict(color="#CCCCCC"),
+            ),
+            plot_bgcolor="rgba(15, 32, 67, 0.8)",
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            margin=dict(l=40, r=40, t=60, b=40),
+            height=350,
+        )
         st.plotly_chart(fig_inbound, use_container_width=True)
       else:
         st.info("Tidak ada data Inbound untuk rentang tanggal 2026 tersebut.")
 
       st.markdown("---")
 
-      # FUNGSI RENDER PLOTLY TABLE DENGAN URUTAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK DI ATAS
+      # FUNGSI RENDER PLOTLY TABLE MATRIX DENGAN URUTAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK
       def render_plotly_table_matrix(df_raw, csv_filename, download_label):
         if df_raw.empty:
           st.info("Tidak ada data.")
           return
 
-        # PIVOT DATA
         pivot = df_raw.pivot(
             index="Cabang", columns="aging_group", values="total_awb"
         ).fillna(0)
@@ -764,7 +792,7 @@ try:
         pivot = pivot[AGING_ORDER]
         pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
 
-        # URUTKAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK (DESCENDING)
+        # URUTKAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK DI ATAS (DESCENDING)
         pivot = pivot.sort_values(by="Grand Total", ascending=False)
 
         grand_total_row = pivot.sum(axis=0)
