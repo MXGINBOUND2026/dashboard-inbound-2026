@@ -87,7 +87,6 @@ if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.success("Cache dibersihkan! Mengunduh file terbaru...")
   st.rerun()
 
-# Memindahkan input password summary ke sidebar secara elegan
 with st.sidebar:
   st.markdown("---")
   st.subheader("🔐 Keamanan Executive")
@@ -108,132 +107,150 @@ try:
   )
 
   # =========================================================
+  # FILTER GLOBAL SIDEBAR
+  # =========================================================
+  st.sidebar.markdown("---")
+  st.sidebar.header("🔍 Filter Data Dashboard")
+
+  min_max_date = conn.execute(f"""
+        SELECT MIN(CAST(Last_Inbound AS DATE)) as min_d, MAX(CAST(Last_Inbound AS DATE)) as max_d 
+        FROM read_parquet('{LOCAL_PARQUET_PATH}') WHERE Last_Inbound IS NOT NULL
+    """).fetchdf()
+
+  default_start = (
+      min_max_date["min_d"][0]
+      if not min_max_date.empty and pd.notnull(min_max_date["min_d"][0])
+      else datetime.date(2026, 1, 1)
+  )
+  default_end = (
+      min_max_date["max_d"][0]
+      if not min_max_date.empty and pd.notnull(min_max_date["max_d"][0])
+      else datetime.date.today()
+  )
+
+  use_date_filter = st.sidebar.checkbox(
+      "📅 Aktifkan Filter Tanggal Last Inbound", value=False
+  )
+
+  date_range = None
+  if use_date_filter:
+    date_range = st.sidebar.date_input(
+        "Pilih Rentang Tanggal:",
+        value=(default_start, default_end),
+        min_value=default_start,
+        max_value=default_end,
+    )
+
+  unique_locations = [
+      r[0]
+      for r in conn.execute(
+          f"SELECT DISTINCT LAST_LOCATION FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+          " WHERE LAST_LOCATION IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+
+  # Batasi Cabang sesuai permintaan
+  allowed_cabang_list = [
+      "Malang",
+      "Batu",
+      "Blitar",
+      "Kepanjen",
+      "Bululawang",
+      "Turen",
+      "Unknown",
+  ]
+  unique_cabang_db = [
+      r[0]
+      for r in conn.execute(
+          f"SELECT DISTINCT Cabang FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+          " WHERE Cabang IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_cabang = [
+      c
+      for c in unique_cabang_db
+      if any(
+          allowed.lower() in str(c).lower() for allowed in allowed_cabang_list
+      )
+  ]
+
+  unique_zona = [
+      r[0]
+      for r in conn.execute(
+          f"SELECT DISTINCT Zona FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+          " WHERE Zona IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_kecamatan = [
+      r[0]
+      for r in conn.execute(
+          f"SELECT DISTINCT Kecamatan FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+          " WHERE Kecamatan IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_status = [
+      r[0]
+      for r in conn.execute(
+          "SELECT DISTINCT Status_Shipment FROM"
+          f" read_parquet('{LOCAL_PARQUET_PATH}') WHERE Status_Shipment IS NOT"
+          " NULL ORDER BY 1"
+      ).fetchall()
+  ]
+  unique_hrs = [
+      r[0]
+      for r in conn.execute(
+          f"SELECT DISTINCT HRS FROM read_parquet('{LOCAL_PARQUET_PATH}')"
+          " WHERE HRS IS NOT NULL ORDER BY 1"
+      ).fetchall()
+  ]
+
+  chosen_loc = st.sidebar.multiselect(
+      "🔍 Filter Last Location:", unique_locations
+  )
+  chosen_cabang = st.sidebar.multiselect("🏢 Filter Cabang:", unique_cabang)
+  chosen_zona = st.sidebar.multiselect("⚡ Filter Zona (QCE):", unique_zona)
+  chosen_kecamatan = st.sidebar.multiselect(
+      "📍 Filter Kecamatan:", unique_kecamatan
+  )
+  chosen_status = st.sidebar.multiselect(
+      "📦 Filter Shipment Status:", unique_status
+  )
+  chosen_hrs = st.sidebar.multiselect("📋 Filter Status HRS:", unique_hrs)
+
+  where_clauses = []
+  if use_date_filter and isinstance(date_range, tuple) and len(date_range) == 2:
+    start_d, end_d = date_range
+    where_clauses.append(
+        f"CAST(Last_Inbound AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
+    )
+
+  if chosen_loc:
+    loc_str = "','".join(chosen_loc)
+    where_clauses.append(f"LAST_LOCATION IN ('{loc_str}')")
+  if chosen_cabang:
+    cab_str = "','".join(chosen_cabang)
+    where_clauses.append(f"Cabang IN ('{cab_str}')")
+  if chosen_zona:
+    zon_str = "','".join(chosen_zona)
+    where_clauses.append(f"Zona IN ('{zon_str}')")
+  if chosen_kecamatan:
+    kec_str = "','".join(chosen_kecamatan)
+    where_clauses.append(f"Kecamatan IN ('{kec_str}')")
+  if chosen_status:
+    stat_str = "','".join(chosen_status)
+    where_clauses.append(f"Status_Shipment IN ('{stat_str}')")
+  if chosen_hrs:
+    hrs_str = "','".join(chosen_hrs)
+    where_clauses.append(f"HRS IN ('{hrs_str}')")
+
+  where_sql = (
+      "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
+  )
+
+  # =========================================================
   # TAB 1: MAIN DASHBOARD
   # =========================================================
   with tab1:
-    st.sidebar.markdown("---")
-    st.sidebar.header("🔍 Filter Data Dashboard")
-
-    min_max_date = conn.execute(f"""
-            SELECT MIN(CAST(Last_Inbound AS DATE)) as min_d, MAX(CAST(Last_Inbound AS DATE)) as max_d 
-            FROM read_parquet('{LOCAL_PARQUET_PATH}') WHERE Last_Inbound IS NOT NULL
-        """).fetchdf()
-
-    default_start = (
-        min_max_date["min_d"][0]
-        if not min_max_date.empty and pd.notnull(min_max_date["min_d"][0])
-        else datetime.date(2026, 1, 1)
-    )
-    default_end = (
-        min_max_date["max_d"][0]
-        if not min_max_date.empty and pd.notnull(min_max_date["max_d"][0])
-        else datetime.date.today()
-    )
-
-    use_date_filter = st.sidebar.checkbox(
-        "📅 Aktifkan Filter Tanggal Last Inbound", value=False
-    )
-
-    date_range = None
-    if use_date_filter:
-      date_range = st.sidebar.date_input(
-          "Pilih Rentang Tanggal:",
-          value=(default_start, default_end),
-          min_value=default_start,
-          max_value=default_end,
-      )
-
-    unique_locations = [
-        r[0]
-        for r in conn.execute(
-            f"SELECT DISTINCT LAST_LOCATION FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-            " WHERE LAST_LOCATION IS NOT NULL ORDER BY 1"
-        ).fetchall()
-    ]
-    unique_cabang = [
-        r[0]
-        for r in conn.execute(
-            f"SELECT DISTINCT Cabang FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-            " WHERE Cabang IS NOT NULL ORDER BY 1"
-        ).fetchall()
-    ]
-    unique_zona = [
-        r[0]
-        for r in conn.execute(
-            f"SELECT DISTINCT Zona FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-            " WHERE Zona IS NOT NULL ORDER BY 1"
-        ).fetchall()
-    ]
-    unique_kecamatan = [
-        r[0]
-        for r in conn.execute(
-            f"SELECT DISTINCT Kecamatan FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-            " WHERE Kecamatan IS NOT NULL ORDER BY 1"
-        ).fetchall()
-    ]
-    unique_status = [
-        r[0]
-        for r in conn.execute(
-            "SELECT DISTINCT Status_Shipment FROM"
-            f" read_parquet('{LOCAL_PARQUET_PATH}') WHERE Status_Shipment IS NOT"
-            " NULL ORDER BY 1"
-        ).fetchall()
-    ]
-    unique_hrs = [
-        r[0]
-        for r in conn.execute(
-            f"SELECT DISTINCT HRS FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-            " WHERE HRS IS NOT NULL ORDER BY 1"
-        ).fetchall()
-    ]
-
-    chosen_loc = st.sidebar.multiselect(
-        "🔍 Filter Last Location:", unique_locations
-    )
-    chosen_cabang = st.sidebar.multiselect("🏢 Filter Cabang:", unique_cabang)
-    chosen_zona = st.sidebar.multiselect("⚡ Filter Zona (QCE):", unique_zona)
-    chosen_kecamatan = st.sidebar.multiselect(
-        "📍 Filter Kecamatan:", unique_kecamatan
-    )
-    chosen_status = st.sidebar.multiselect(
-        "📦 Filter Shipment Status:", unique_status
-    )
-    chosen_hrs = st.sidebar.multiselect("📋 Filter Status HRS:", unique_hrs)
-
-    where_clauses = []
-    if (
-        use_date_filter
-        and isinstance(date_range, tuple)
-        and len(date_range) == 2
-    ):
-      start_d, end_d = date_range
-      where_clauses.append(
-          f"CAST(Last_Inbound AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
-      )
-
-    if chosen_loc:
-      loc_str = "','".join(chosen_loc)
-      where_clauses.append(f"LAST_LOCATION IN ('{loc_str}')")
-    if chosen_cabang:
-      cab_str = "','".join(chosen_cabang)
-      where_clauses.append(f"Cabang IN ('{cab_str}')")
-    if chosen_zona:
-      zon_str = "','".join(chosen_zona)
-      where_clauses.append(f"Zona IN ('{zon_str}')")
-    if chosen_kecamatan:
-      kec_str = "','".join(chosen_kecamatan)
-      where_clauses.append(f"Kecamatan IN ('{kec_str}')")
-    if chosen_status:
-      stat_str = "','".join(chosen_status)
-      where_clauses.append(f"Status_Shipment IN ('{stat_str}')")
-    if chosen_hrs:
-      hrs_str = "','".join(chosen_hrs)
-      where_clauses.append(f"HRS IN ('{hrs_str}')")
-
-    where_sql = (
-        "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
-    )
-
     try:
       max_date_df = conn.execute(f"""
                 SELECT MAX(
@@ -622,83 +639,78 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC (PROTECTED PASSWORD = MXG125)
+  # TAB 2: SUMMARY EXEC (TERHUBUNG KE FILTER GLOBAL SIDEBAR)
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
       st.title("📊 Executive Summary & Performance Analytics")
 
-      # KPI Summary Cards ala Infografis Modern
+      # KPI Summary Cards (Kini terhubung dengan where_sql dari sidebar)
       kpi_data = conn.execute(f"""
                 SELECT 
                     COUNT(DISTINCT AWB) as total_ytd,
                     COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) as unrun_total,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') AND age_days > 7 THEN AWB END) as unrun_gt7,
-                    ROUND(100.0 * COUNT(DISTINCT CASE WHEN Status_Shipment = 'SUCCESS DELIVERY' THEN AWB END) / NULLIF(COUNT(DISTINCT AWB), 0), 1) as success_rate
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) as total_success_unhrs_kpi,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) as total_undel_unhrs_kpi
+                FROM read_parquet('{LOCAL_PARQUET_PATH}') {where_sql}
             """).fetchdf()
 
       t_ytd = kpi_data["total_ytd"][0] or 0
       u_tot = kpi_data["unrun_total"][0] or 0
-      u_gt7 = kpi_data["unrun_gt7"][0] or 0
-      s_rate = kpi_data["success_rate"][0] or 0.0
+      succ_unhrs_val = kpi_data["total_success_unhrs_kpi"][0] or 0
+      undel_unhrs_val = kpi_data["total_undel_unhrs_kpi"][0] or 0
 
       k1, k2, k3, k4 = st.columns(4)
       with k1:
         st.metric(
             label="📦 Total Inbound YTD",
+       [cite: 15]
             value=f"{t_ytd:,}",
-            delta="+1.2% vs Last Week",
+            delta="Filtered",
         )
       with k2:
         st.metric(
             label="🚨 Total UnRunsheet Aging",
             value=f"{u_tot:,}",
-            delta="-0.5%",
+            delta="Active Alert",
             delta_color="inverse",
         )
       with k3:
         st.metric(
-            label="⚠️ UnRunsheet > H+7",
-            value=f"{u_gt7:,}",
-            delta="Critical Alert",
-            delta_color="inverse",
+            label="⚠️ Total Success UnHRS",
+            value=f"{succ_unhrs_val:,}",
+            delta="Optimized",
         )
       with k4:
         st.metric(
-            label="🎯 Success Rate Delivery",
-            value=f"{s_rate}%",
-            delta="Optimal",
+            label="❌ Total Undel UnHRS",
+            value=f"{undel_unhrs_val:,}",
+            delta="Needs Review",
+            delta_color="inverse",
         )
 
       st.markdown("---")
 
-      target_cabang = [
-          "Malang",
-          "Batu",
-          "Blitar",
-          "Kepanjen",
-          "Bululawang",
-          "Turen",
-      ]
-      cabang_filter_str = "','".join(target_cabang)
-
       cab_counts = conn.execute(f"""
                 SELECT Cabang, COUNT(DISTINCT AWB) as total
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Cabang IN ('{cabang_filter_str}')
+                {where_sql}
                 GROUP BY Cabang
             """).fetchdf()
 
-      summary_str = " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join([
-          f"<b>{row.Cabang}</b>: {row.total:,} AWB"
-          for idx, row in cab_counts.iterrows()
-      ])
+      summary_str = (
+          " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join([
+              f"<b>{row.Cabang}</b>: {row.total:,} AWB"
+              for idx, row in cab_counts.iterrows()
+          ])
+          if not cab_counts.empty
+          else "Tidak ada data sesuai filter"
+      )
 
       st.markdown(
           f"""
             <marquee style="color: #2c3e50; background-color: #e8f4f8; padding: 10px; border-radius: 5px; font-weight: 600; font-size: 15px;">
-                🔄 Last Update: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏢 <b>Total Inbound Per Cabang:</b> {summary_str}
+                🔄 Last Update: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏢 <b>Total Inbound (Filtered):</b> {summary_str}
             </marquee>
         """,
           unsafe_allow_html=True,
@@ -723,7 +735,7 @@ try:
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as min_d, 
                     MAX(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as max_d 
                 FROM read_parquet('{LOCAL_PARQUET_PATH}') 
-                WHERE EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
             """).fetchdf()
 
       inbound_start = (
@@ -779,7 +791,7 @@ try:
                     COUNT(DISTINCT AWB) AS total_awb,
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
                   {inbound_date_clause}
                 GROUP BY 1
                 ORDER BY sort_key ASC
@@ -800,7 +812,7 @@ try:
         )
         fig_inbound.update_layout(
             title=dict(
-                text="<b>TOTAL INBOUND 2026</b>",
+                text="<b>TOTAL INBOUND 2026 (FILTERED)</b>",
                 x=0.5,
                 xanchor="center",
                 font=dict(size=18, color="#FFFFFF"),
@@ -825,7 +837,9 @@ try:
         )
         st.plotly_chart(fig_inbound, use_container_width=True)
       else:
-        st.info("Tidak ada data Inbound untuk rentang tanggal 2026 tersebut.")
+        st.info(
+            "Tidak ada data Inbound untuk filter dan rentang tanggal tersebut."
+        )
 
       st.markdown("---")
 
@@ -945,8 +959,7 @@ try:
       df_unrun = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
-                  AND Cabang IN ('{cabang_filter_str}')
+                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
             """).fetchdf()
       render_plotly_table_matrix(
@@ -977,9 +990,8 @@ try:
                             ELSE '>H+7'
                         END AS aging_group, AWB
                     FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                    {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                       AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                      AND Cabang IN ('{cabang_filter_str}')
                 ) sub GROUP BY Cabang, aging_group
             """).fetchdf()
       render_plotly_table_matrix(
@@ -1010,9 +1022,8 @@ try:
                             ELSE '>H+7'
                         END AS aging_group, AWB
                     FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    WHERE Status_Shipment = 'UNDELIVERY'
+                    {where_sql} AND Status_Shipment = 'UNDELIVERY'
                       AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                      AND Cabang IN ('{cabang_filter_str}')
                 ) sub GROUP BY Cabang, aging_group
             """).fetchdf()
       render_plotly_table_matrix(
@@ -1028,7 +1039,7 @@ try:
       )
 
   # =========================================================
-  # TAB 3: MAP UNRUNSHEET (DIPERBAIKI AGAR RINGAN & AKURAT)
+  # TAB 3: MAP UNRUNSHEET (DIPERBAIKI AGAR TAMPIL & RINGAN)
   # =========================================================
   with tab3:
     st.subheader(
@@ -1036,21 +1047,20 @@ try:
         " Blitar Raya)"
     )
     st.caption(
-        "Visualisasi titik berat volume UnRunsheet berdasarkan wilayah"
-        " terpetakan."
+        "Visualisasi titik koordinat wilayah kecamatan UnRunsheet yang"
+        " dioptimalkan agar cepat termuat."
     )
 
     df_map_raw = conn.execute(f"""
             SELECT UPPER(TRIM(Kecamatan)) AS Kecamatan, COUNT(DISTINCT AWB) AS total_unrun
             FROM read_parquet('{LOCAL_PARQUET_PATH}')
-            WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+            {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
               AND Kecamatan IS NOT NULL
             GROUP BY 1
             ORDER BY total_unrun DESC
         """).fetchdf()
 
     if not df_map_raw.empty:
-      # Peta Koordinat Acuan Wilayah Malang & Blitar Raya yang Presisi
       coords_map = {
           "MALANG": [-7.9666, 112.6326],
           "KEPANJEN": [-8.1308, 112.5693],
@@ -1070,17 +1080,17 @@ try:
       lat_list, lon_list, size_list = [], [], []
       for idx, row in df_map_raw.iterrows():
         kec = row["Kecamatan"]
-        # Jika kecamatan terdaftar gunakan koordinat aslinya, jika tidak berikan sebaran terpusat di Malang Raya
         if kec in coords_map:
           lat_list.append(coords_map[kec][0])
           lon_list.append(coords_map[kec][1])
         else:
-          lat_list.append(-7.9839 + ((idx % 5) * 0.02))
-          lon_list.append(112.6214 + ((idx % 5) * 0.02))
+          # Memberikan sebaran koordinat titik grid terpusat yang rapi di wilayah Malang Raya jika nama kecamatan tidak ada di kamus
+          lat_list.append(-7.9839 + (((idx * 3) % 15) * 0.012))
+          lon_list.append(112.6214 + (((idx * 3) % 15) * 0.012))
 
         size_list.append(
-            max(float(row["total_unrun"]) * 15, 3000)
-        )  # Disesuaikan agar radius scatter jelas di peta
+            max(float(row["total_unrun"]) * 8, 2500)
+        )  # Ukuran radius disesuaikan agar proporsional
 
       df_map_raw["lat"] = lat_list
       df_map_raw["lon"] = lon_list
@@ -1090,14 +1100,14 @@ try:
           "ScatterplotLayer",
           data=df_map_raw,
           get_position=["lon", "lat"],
-          get_color=[220, 53, 69, 180],
+          get_color=[220, 53, 69, 190],
           get_radius="radius",
           pickable=True,
           auto_highlight=True,
       )
 
       view_state = pdk.ViewState(
-          latitude=-7.9839, longitude=112.6214, zoom=10, pitch=20
+          latitude=-7.9839, longitude=112.6214, zoom=10.5, pitch=25
       )
 
       r = pdk.Deck(
@@ -1108,7 +1118,8 @@ try:
               "style": {
                   "backgroundColor": "#1f2937",
                   "color": "white",
-                  "borderRadius": "5px",
+                  "borderRadius": "6px",
+                  "padding": "8px",
               },
           },
           map_style="mapbox://styles/mapbox/dark-v10",
@@ -1123,7 +1134,10 @@ try:
           height=300,
       )
     else:
-      st.info("Tidak ada data geolokasi UnRunsheet untuk ditampilkan.")
+      st.info(
+          "Tidak ada data geolokasi UnRunsheet untuk ditampilkan berdasarkan"
+          " filter aktif."
+      )
 
 except Exception as main_err:
   st.error("⚠️ Terjadi masalah saat mengolah data dashboard:")
