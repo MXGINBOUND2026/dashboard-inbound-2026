@@ -4,7 +4,6 @@ import os
 import duckdb
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -755,73 +754,79 @@ try:
 
       st.markdown("---")
 
-      # Fungsi Helper Pembuat Matrix Heatmap Berurutan (Posisi X-Axis di Atas)
-      def create_sorted_heatmap(
-          df,
-          x_col,
-          y_col,
-          z_col,
-          title,
-          colorscale,
-          csv_filename,
-          download_label,
-      ):
-        if df.empty:
-          st.info(f"Tidak ada data {title}.")
+      # Fungsi Formatting Warna Sel Berdasarkan Threshold Aging
+      def style_aging_table(val, col_name):
+        if col_name == "H+0":
+          if val > 0:
+            return (
+                "background-color: #28a745; color: white; font-weight: bold;"
+            )
+        elif col_name in ["H+1", "H+2"]:
+          if val > 0:
+            return (
+                "background-color: #ffc107; color: black; font-weight: bold;"
+            )
+        elif col_name in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
+          if val > 0:
+            return (
+                "background-color: #dc3545; color: white; font-weight: bold;"
+            )
+        return ""
+
+      def render_colored_matrix(df_raw, csv_filename, download_label):
+        if df_raw.empty:
+          st.info("Tidak ada data.")
           return
 
-        pivot_df = df.pivot(
-            index=y_col, columns=x_col, values=z_col
+        # PIVOT DATA
+        pivot = df_raw.pivot(
+            index="Cabang", columns="aging_group", values="total_awb"
         ).fillna(0)
         for col in AGING_ORDER:
-          if col not in pivot_df.columns:
-            pivot_df[col] = 0
-        pivot_df = pivot_df[AGING_ORDER]
+          if col not in pivot.columns:
+            pivot[col] = 0
 
-        # Penyesuaian Kontras Warna Terkait Tingkat Aging (Semakin tua semakin pekat)
-        weighted_values = pivot_df.values.copy()
-        for idx, col in enumerate(AGING_ORDER):
-          multiplier = 1.0 + (idx * 0.35)
-          weighted_values[:, idx] = weighted_values[:, idx] * multiplier
+        pivot = pivot[AGING_ORDER]
 
-        text_values = [
-            [f"{int(val):,}" for val in row] for row in pivot_df.values
-        ]
+        # TAMBAH KOLOM GRAND TOTAL (SAMPING)
+        pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
 
-        fig = go.Figure(
-            data=go.Heatmap(
-                z=weighted_values,
-                x=AGING_ORDER,
-                y=pivot_df.index,
-                colorscale=colorscale,
-                text=text_values,
-                texttemplate="%{text}",
-                textfont={"size": 11},
-                hoverinfo="x+y+text",
-                showscale=False,
-            )
+        # TAMBAH BARIS GRAND TOTAL (BAWAH)
+        grand_total_row = pivot.sum(axis=0)
+        grand_total_row.name = "Grand Total"
+
+        pivot_with_total = pd.concat([pivot, pd.DataFrame([grand_total_row])])
+        pivot_with_total = pivot_with_total.reset_index().rename(
+            columns={"index": "Cabang"}
         )
 
-        fig.update_layout(
-            title=title,
-            xaxis=dict(
-                title="Aging (Urut Terdaun ke Tertua)",
-                type="category",
-                categoryorder="array",
-                categoryarray=AGING_ORDER,
-                side="top",  # Posisi sumbu X dipindah ke atas
-            ),
-            yaxis=dict(title="Cabang", autorange="reversed"),
-            plot_bgcolor="rgba(40, 40, 40, 0.8)",
-            paper_bgcolor="rgba(0, 0, 0, 0)",
-            font=dict(color="#CCCCCC", size=12),
-            height=350,
-            margin=dict(l=40, r=40, t=70, b=40),
-        )
+        # STYLING PER SEL (EXCLUDE BARIS & KOLOM GRAND TOTAL)
+        styled_df = pivot_with_total.style.apply(
+            lambda col: [
+                (
+                    style_aging_table(val, col.name)
+                    if row_idx != len(pivot_with_total) - 1
+                    else "font-weight: bold; background-color: #333333; color:"
+                    " white;"
+                )
+                for row_idx, val in enumerate(col)
+            ]
+            if col.name not in ["Cabang", "Grand Total"]
+            else [
+                (
+                    "font-weight: bold; background-color: #333333; color:"
+                    " white;"
+                    if row_idx == len(pivot_with_total) - 1
+                    else "font-weight: bold;"
+                )
+                for row_idx in range(len(col))
+            ],
+            axis=0,
+        ).format({col: "{:,.0f}" for col in AGING_ORDER + ["Grand Total"]})
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(styled_df, use_container_width=True)
 
-        csv_data = pivot_df.reset_index().to_csv(index=False).encode("utf-8")
+        csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=download_label,
             data=csv_data,
@@ -836,7 +841,7 @@ try:
           "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)"
       )
 
-      df_unrun_heat = conn.execute(f"""
+      df_unrun = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
                 WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
@@ -844,13 +849,8 @@ try:
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      create_sorted_heatmap(
-          df=df_unrun_heat,
-          x_col="aging_group",
-          y_col="Cabang",
-          z_col="total_awb",
-          title="Heatmap Matrix UnRunsheet Per Cabang",
-          colorscale="Blues",
+      render_colored_matrix(
+          df_raw=df_unrun,
           csv_filename="Matrix_UnRunsheet_Cabang.csv",
           download_label="📥 Download Data Matrix UnRunsheet (CSV)",
       )
@@ -865,7 +865,7 @@ try:
           " TGL_UPDATE_STATUS_POD)"
       )
 
-      df_succ_heat = conn.execute(f"""
+      df_succ = conn.execute(f"""
                 SELECT 
                     Cabang, 
                     CASE 
@@ -878,22 +878,17 @@ try:
                         WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
                         WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
                         ELSE '>H+7'
-                    END AS aging_pod,
+                    END AS aging_group,
                     COUNT(DISTINCT AWB) AS total_awb
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
                 WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                   AND Cabang IN ('{cabang_filter_str}')
-                GROUP BY Cabang, aging_pod
+                GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      create_sorted_heatmap(
-          df=df_succ_heat,
-          x_col="aging_pod",
-          y_col="Cabang",
-          z_col="total_awb",
-          title="Heatmap Matrix Success UnHRS Per Cabang",
-          colorscale="Greens",
+      render_colored_matrix(
+          df_raw=df_succ,
           csv_filename="Matrix_Success_UnHRS_Cabang.csv",
           download_label="📥 Download Data Matrix Success UnHRS (CSV)",
       )
@@ -908,7 +903,7 @@ try:
           " TGL_UPDATE_STATUS_POD)"
       )
 
-      df_undel_heat = conn.execute(f"""
+      df_undel = conn.execute(f"""
                 SELECT 
                     Cabang, 
                     CASE 
@@ -921,22 +916,17 @@ try:
                         WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
                         WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
                         ELSE '>H+7'
-                    END AS aging_pod,
+                    END AS aging_group,
                     COUNT(DISTINCT AWB) AS total_awb
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
                 WHERE Status_Shipment = 'UNDELIVERY'
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                   AND Cabang IN ('{cabang_filter_str}')
-                GROUP BY Cabang, aging_pod
+                GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      create_sorted_heatmap(
-          df=df_undel_heat,
-          x_col="aging_pod",
-          y_col="Cabang",
-          z_col="total_awb",
-          title="Heatmap Matrix Undel UnHRS Per Cabang",
-          colorscale="Oranges",
+      render_colored_matrix(
+          df_raw=df_undel,
           csv_filename="Matrix_Undel_UnHRS_Cabang.csv",
           download_label="📥 Download Data Matrix Undel UnHRS (CSV)",
       )
