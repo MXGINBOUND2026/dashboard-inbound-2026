@@ -342,7 +342,6 @@ query_duckdb = f"""
                     ELSE '-'
                 END AS HRS,
 
-                -- PENYESUAIAN CALCULATED AGE_DAYS DENGAN PENGAMAN UNINBOUND
                 CASE 
                     WHEN valid_inbound_date IS NOT NULL THEN DATEDIFF('day', valid_inbound_date, CURRENT_TIMESTAMP)
                     WHEN valid_uninbound_date IS NOT NULL THEN DATEDIFF('day', valid_uninbound_date, CURRENT_TIMESTAMP)
