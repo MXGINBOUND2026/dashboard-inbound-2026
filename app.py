@@ -85,9 +85,6 @@ if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.success("Cache dibersihkan! Mengunduh file terbaru...")
   st.rerun()
 
-# Tombol Input Password Tab Summary
-st.sidebar.markdown("---")
-st.sidebar.header("🔒 Akses Fitur Summary Exec")
 summary_pass = st.sidebar.text_input(
     "🔑 Masukkan Password Summary:", type="password"
 )
@@ -100,12 +97,8 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 try:
   conn = duckdb.connect()
 
-  # Tab Navigasi Utama
   tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
 
-  # =========================================================
-  # TAB 1: MAIN DASHBOARD
-  # =========================================================
   with tab1:
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Filter Data Dashboard")
@@ -230,7 +223,6 @@ try:
         "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
     )
 
-    # Running Text Utama
     try:
       max_date_df = conn.execute(f"""
                 SELECT MAX(
@@ -278,7 +270,6 @@ try:
     if "active_card_filter" not in st.session_state:
       st.session_state.active_card_filter = None
 
-    # Metric Cards Utama
     metrics_res = conn.execute(f"""
             SELECT 
                 COUNT(DISTINCT AWB) AS total_awb,
@@ -636,7 +627,6 @@ try:
       ]
       cabang_filter_str = "','".join(target_cabang)
 
-      # 1. Running Text Total AWB Per Cabang
       cab_counts = conn.execute(f"""
                 SELECT Cabang, COUNT(DISTINCT AWB) as total
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
@@ -660,7 +650,6 @@ try:
 
       st.markdown("---")
 
-      # 2. Grafik Total Inbound Per Tanggal (STRICT TAHUN 2026 & FILTER RENTANG TANGGAL)
       st.subheader("📈 1. Grafik Total Inbound Per Tanggal (Tahun 2026)")
 
       col_gran, col_date = st.columns([1, 1])
@@ -754,7 +743,6 @@ try:
 
       st.markdown("---")
 
-      # Fungsi Formatting Warna Sel Berdasarkan Threshold Aging
       def style_aging_table(val, col_name):
         if col_name == "H+0":
           if val > 0:
@@ -778,7 +766,6 @@ try:
           st.info("Tidak ada data.")
           return
 
-        # PIVOT DATA
         pivot = df_raw.pivot(
             index="Cabang", columns="aging_group", values="total_awb"
         ).fillna(0)
@@ -787,11 +774,8 @@ try:
             pivot[col] = 0
 
         pivot = pivot[AGING_ORDER]
-
-        # TAMBAH KOLOM GRAND TOTAL (SAMPING)
         pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
 
-        # TAMBAH BARIS GRAND TOTAL (BAWAH)
         grand_total_row = pivot.sum(axis=0)
         grand_total_row.name = "Grand Total"
 
@@ -800,7 +784,6 @@ try:
             columns={"index": "Cabang"}
         )
 
-        # STYLING PER SEL (EXCLUDE BARIS & KOLOM GRAND TOTAL)
         styled_df = pivot_with_total.style.apply(
             lambda col: [
                 (
@@ -858,7 +841,7 @@ try:
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG
+      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG (FIXED SUBQUERY)
       # =========================================================
       st.subheader(
           "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging"
@@ -866,24 +849,27 @@ try:
       )
 
       df_succ = conn.execute(f"""
-                SELECT 
-                    Cabang, 
-                    CASE 
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END AS aging_group,
-                    COUNT(DISTINCT AWB) AS total_awb
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                  AND Cabang IN ('{cabang_filter_str}')
+                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
+                FROM (
+                    SELECT 
+                        Cabang, 
+                        CASE 
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
+                            ELSE '>H+7'
+                        END AS aging_group,
+                        AWB
+                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                      AND Cabang IN ('{cabang_filter_str}')
+                ) sub
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
@@ -896,7 +882,7 @@ try:
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG
+      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG (FIXED SUBQUERY)
       # =========================================================
       st.subheader(
           "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging"
@@ -904,24 +890,27 @@ try:
       )
 
       df_undel = conn.execute(f"""
-                SELECT 
-                    Cabang, 
-                    CASE 
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END AS aging_group,
-                    COUNT(DISTINCT AWB) AS total_awb
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Status_Shipment = 'UNDELIVERY'
-                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                  AND Cabang IN ('{cabang_filter_str}')
+                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
+                FROM (
+                    SELECT 
+                        Cabang, 
+                        CASE 
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
+                            ELSE '>H+7'
+                        END AS aging_group,
+                        AWB
+                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    WHERE Status_Shipment = 'UNDELIVERY'
+                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                      AND Cabang IN ('{cabang_filter_str}')
+                ) sub
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
