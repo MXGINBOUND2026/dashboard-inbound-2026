@@ -673,7 +673,6 @@ try:
             horizontal=True,
         )
 
-      # Ambil Min & Max Date Tahun 2026 dari Inbound Date
       min_max_inbound_2026 = conn.execute(f"""
                 SELECT 
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as min_d, 
@@ -795,12 +794,7 @@ try:
         pivot_unrun = pivot_unrun[["Cabang"] + all_agings]
         pivot_unrun["Grand Total"] = pivot_unrun[all_agings].sum(axis=1)
 
-        st.dataframe(
-            pivot_unrun.style.background_gradient(
-                cmap="Blues", subset=all_agings
-            ).format({col: "{:,.0f}" for col in all_agings + ["Grand Total"]}),
-            use_container_width=True,
-        )
+        st.dataframe(pivot_unrun, use_container_width=True)
 
         csv_unrun = pivot_unrun.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -868,12 +862,7 @@ try:
         pivot_succ = pivot_succ[["Cabang"] + all_agings]
         pivot_succ["Grand Total"] = pivot_succ[all_agings].sum(axis=1)
 
-        st.dataframe(
-            pivot_succ.style.background_gradient(
-                cmap="Greens", subset=all_agings
-            ).format({col: "{:,.0f}" for col in all_agings + ["Grand Total"]}),
-            use_container_width=True,
-        )
+        st.dataframe(pivot_succ, use_container_width=True)
 
         csv_succ = pivot_succ.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -941,12 +930,7 @@ try:
         pivot_undel = pivot_undel[["Cabang"] + all_agings]
         pivot_undel["Grand Total"] = pivot_undel[all_agings].sum(axis=1)
 
-        st.dataframe(
-            pivot_undel.style.background_gradient(
-                cmap="Oranges", subset=all_agings
-            ).format({col: "{:,.0f}" for col in all_agings + ["Grand Total"]}),
-            use_container_width=True,
-        )
+        st.dataframe(pivot_undel, use_container_width=True)
 
         csv_undel = pivot_undel.to_csv(index=False).encode("utf-8")
         st.download_button(
