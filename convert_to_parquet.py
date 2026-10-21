@@ -7,7 +7,7 @@ import duckdb
 import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 SUPPORTING_GDRIVE_FOLDER_ID = "1EsUiz1Egqzlbk0gpaohr7lZBcR5rqB2Y"
@@ -232,13 +232,11 @@ query_duckdb = f"""
                 COALESCE(TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)) AS dt_run,
                 COALESCE(TRY_STRPTIME(TGL_RECEIVED, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_RECEIVED, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_RECEIVED AS TIMESTAMP)) AS dt_tgl_rec,
                 
+                -- ATURAN KATEGORI RETURN MUTLAK JIKA TERDAPAT CONNOTE RETURN
                 CASE 
-                    WHEN UPPER(TRIM(COALESCE(raw_pod_category, ''))) = 'CUSTOMER REQUEST' 
-                         AND (
-                             (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-') 
-                             OR 
-                             (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
-                         )
+                    WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-') 
+                         OR 
+                         (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
                     THEN 'Return'
                     ELSE raw_pod_category
                 END AS POD_Category
@@ -284,28 +282,34 @@ query_duckdb = f"""
                     ELSE NULL
                 END AS LAST_LOCATION,
                 
-                -- HIRARKI LOGIKA STATUS SHIPMENT REVISI
+                -- HIRARKI LOGIKA STATUS SHIPMENT FINAL
                 CASE 
                     -- 1. AWB Cancel
                     WHEN UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'Y' THEN 'AWB Cancel'
                     
-                    -- 2. Unrunsheet AU (HOC) [DIDAHULUKAN sebelum POD_Category]
-                    WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
-                         AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HOC%'
-                    THEN 'Unrunsheet AU (HOC)'
-
-                    -- 3. Success UnHRS [DIDAHULUKAN sebelum POD_Category agar tidak langsung jadi SUCCESS DELIVERY]
-                    WHEN UPPER(COALESCE(STATUS_POD, '')) IN ('SUCCESS', 'RETURN SHIPPER') 
-                         AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) NOT LIKE '%HRS%' 
+                    -- 2. Success UnHRS (POD_Category SUCCESS DELIVERY/RETURN SHIPPER & WUS_OUTGOING_CODE TIDAK mengandung HRS)
+                    WHEN UPPER(TRIM(COALESCE(POD_Category, ''))) IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                         AND (
+                             WUS_OUTGOING_CODE IS NULL 
+                             OR TRIM(CAST(WUS_OUTGOING_CODE AS VARCHAR)) = '' 
+                             OR WUS_OUTGOING_CODE = '-'
+                             OR UPPER(CAST(WUS_OUTGOING_CODE AS VARCHAR)) NOT LIKE '%HRS%'
+                         )
                     THEN 'Success UnHRS'
 
-                    -- 4. Kategori POD dari Coding.xlsx (jika ada)
+                    -- 3. Kategori POD Resmi Lainnya (SUCCESS DELIVERY/RETURN SHIPPER yang terisi HRS, BREACH, RETURN, CLAIM, dll.)
                     WHEN POD_Category IS NOT NULL AND TRIM(CAST(POD_Category AS VARCHAR)) != '' AND POD_Category != '-' THEN POD_Category
+                    
+                    -- 4. Unrunsheet AU (HOC) - DATE_RUNSHEET & CODING kosong, WUS_OUTGOING_CODE mengandung HOC
+                    WHEN (DATE_RUNSHEET IS NULL OR TRIM(CAST(DATE_RUNSHEET AS VARCHAR)) = '' OR DATE_RUNSHEET = '-')
+                         AND (CODING IS NULL OR TRIM(CAST(CODING AS VARCHAR)) = '' OR CODING = '-')
+                         AND UPPER(COALESCE(WUS_OUTGOING_CODE, '')) LIKE '%HOC%'
+                    THEN 'Unrunsheet AU (HOC)'
                     
                     -- 5. UnReceiving
                     WHEN RECEIVING_DATE IS NULL OR TRIM(CAST(RECEIVING_DATE AS VARCHAR)) = '' OR RECEIVING_DATE = '-' THEN 'UnReceiving'
                     
-                    -- 6. UnOutbound (Pengecualian Service CTC jika HVO/HVI terisi)
+                    -- 6. UnOutbound (Pengecualian Service CTC)
                     WHEN (OUTBOUND_MANIFEST_DATE IS NULL OR TRIM(CAST(OUTBOUND_MANIFEST_DATE AS VARCHAR)) = '' OR OUTBOUND_MANIFEST_DATE = '-')
                          AND NOT (
                              UPPER(SERVICE) LIKE '%CTC%' 
@@ -317,7 +321,7 @@ query_duckdb = f"""
                          ) 
                     THEN 'UnOutbound'
                     
-                    -- 7. UnInbound (Last_Inbound KOSONG, KECUALI SERVICE CTC dengan HVI/HVO atau DATE_RUNSHEET terisi)
+                    -- 7. UnInbound (Last_Inbound Kosong, KECUALI CTC yang terisi HVI/HVO/Runsheet)
                     WHEN valid_inbound_date IS NULL
                          AND NOT (
                              UPPER(SERVICE) LIKE '%CTC%' 
