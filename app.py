@@ -118,6 +118,14 @@ try:
       if "RUNSHEET_COURIER_NAME" in parquet_columns
       else "CAST(NULL AS VARCHAR) AS RUNSHEET_COURIER_NAME"
   )
+  tgl_rec_col_expr = (
+      "TGL_RECEIVED"
+      if "TGL_RECEIVED" in parquet_columns
+      else "CAST(NULL AS VARCHAR) AS TGL_RECEIVED"
+  )
+  coding_col_expr = (
+      "CODING" if "CODING" in parquet_columns else "CAST(NULL AS VARCHAR) AS CODING"
+  )
 
   conn.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
@@ -126,6 +134,8 @@ try:
             {wus_col_expr},
             {bil_col_expr},
             {courier_col_expr},
+            {tgl_rec_col_expr},
+            {coding_col_expr},
             CASE 
                 WHEN BILNOTE_AMOUNT IS NOT NULL AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '' AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '0' 
                 THEN 'COD' 
@@ -450,8 +460,6 @@ try:
                     Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
                     AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 """
-        # Tabel Success UnHRS khusus sesuai permintaan user:
-        # AWB, Last_Location, TGL_RECEIVED, CODING, Kategori COD / Non-COD, BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
         df_card_detail = conn.execute(f"""
                     SELECT AWB, LAST_LOCATION AS Last_Location, TGL_RECEIVED, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
                     FROM v_inbound
@@ -698,9 +706,7 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-      # Helper function for calculating WoW trend for Success/Undel KPIs
       def get_kpi_metrics(status_filter_sql, zona_filter_sql, aging_target_val):
-        # Current period (all records or filtered by sidebar)
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_awb,
@@ -714,7 +720,6 @@ try:
         tgt = curr_df["target_awb"][0] or 0
         pct = (tgt / tot * 100.0) if tot > 0 else 0.0
 
-        # Previous week comparison (using WUS_DATE or TGL_UPDATE_STATUS_POD week-over-week)
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_awb,
@@ -733,28 +738,24 @@ try:
         wow_diff = pct - p_pct
         return tgt, pct, wow_diff
 
-      # Success UnHRS Zona A & B H+0
       succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           aging_target_val="wus_aging_group = 'H+0'",
       )
 
-      # Success UnHRS Zona C H+1
       succ_c_vol, succ_c_pct, succ_c_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           aging_target_val="wus_aging_group = 'H+1'",
       )
 
-      # Undel UnHRS Zona A & B H+0
       undel_ab_vol, undel_ab_pct, undel_ab_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           aging_target_val="wus_aging_group = 'H+0'",
       )
 
-      # Undel UnHRS Zona C H+1
       undel_c_vol, undel_c_pct, undel_c_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
