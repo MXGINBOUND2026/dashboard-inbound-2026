@@ -101,7 +101,6 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 try:
   conn = duckdb.connect()
 
-  # Memastikan kolom WUS_DATE dan BILNOTE_AMOUNT tersedia di query layer DuckDB (jika belum ada, dibuat NULL)
   parquet_columns = conn.execute(
       f"DESCRIBE SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')"
   ).fetchdf()["column_name"].tolist()
@@ -114,35 +113,40 @@ try:
       if "BILNOTE_AMOUNT" in parquet_columns
       else "CAST(NULL AS DOUBLE) AS BILNOTE_AMOUNT"
   )
+  courier_col_expr = (
+      "RUNSHEET_COURIER_NAME"
+      if "RUNSHEET_COURIER_NAME" in parquet_columns
+      else "CAST(NULL AS VARCHAR) AS RUNSHEET_COURIER_NAME"
+  )
 
-  # Buat view virtual terintegrasi dengan kolom tambahan WUS_DATE, BILNOTE_AMOUNT, COD/NON-COD, dan Aging WUS vs POD
   conn.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
         SELECT 
             *,
             {wus_col_expr},
             {bil_col_expr},
+            {courier_col_expr},
             CASE 
                 WHEN BILNOTE_AMOUNT IS NOT NULL AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '' AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '0' 
                 THEN 'COD' 
                 ELSE 'Non COD' 
             END AS payment_type,
             CASE 
-                WHEN TGL_UPDATE_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN 
-                    GREATEST(0, DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)))
+                WHEN TGL_UPDATE_STATUS_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN 
+                    GREATEST(0, DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)))
                 ELSE NULL 
             END as wus_aging_days,
             CASE 
-                WHEN TGL_UPDATE_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN
+                WHEN TGL_UPDATE_STATUS_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN
                     CASE 
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_POD AS DATE), CAST(WUS_DATE AS DATE)) = 7 THEN 'H+7'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
                 ELSE 'H+0'
@@ -446,29 +450,38 @@ try:
                     Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
                     AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 """
-      elif card_title == "Undel UnHRS":
-        card_query_filter = """
-                    Status_Shipment = 'UNDELIVERY' 
-                    AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                """
-      elif card_title == "Total UnRunsheet":
-        card_query_filter = (
-            "Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
-        )
-      elif card_title == "UnRunsheet with PRA":
-        card_query_filter = "Status_Shipment = 'UnRunsheet with PRA'"
-      elif card_title == "UnInbound":
-        card_query_filter = "Status_Shipment = 'UnInbound'"
+        # Tabel Success UnHRS khusus sesuai permintaan user:
+        # AWB, Last_Location, TGL_RECEIVED, CODING, Kategori COD / Non-COD, BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
+        df_card_detail = conn.execute(f"""
+                    SELECT AWB, LAST_LOCATION AS Last_Location, TGL_RECEIVED, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
+                    FROM v_inbound
+                    {where_sql} AND {card_query_filter}
+                    LIMIT 1000
+                """).fetchdf()
       else:
-        card_query_filter = "1=1"
+        if card_title == "Undel UnHRS":
+          card_query_filter = """
+                        Status_Shipment = 'UNDELIVERY' 
+                        AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                    """
+        elif card_title == "Total UnRunsheet":
+          card_query_filter = (
+              "Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
+          )
+        elif card_title == "UnRunsheet with PRA":
+          card_query_filter = "Status_Shipment = 'UnRunsheet with PRA'"
+        elif card_title == "UnInbound":
+          card_query_filter = "Status_Shipment = 'UnInbound'"
+        else:
+          card_query_filter = "1=1"
 
-      df_card_detail = conn.execute(f"""
-                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
-                FROM v_inbound
-                {where_sql} AND {card_query_filter}
-                ORDER BY wus_aging_days DESC
-                LIMIT 1000
-            """).fetchdf()
+        df_card_detail = conn.execute(f"""
+                    SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                    FROM v_inbound
+                    {where_sql} AND {card_query_filter}
+                    ORDER BY wus_aging_days DESC
+                    LIMIT 1000
+                """).fetchdf()
 
       if not df_card_detail.empty:
         st.caption(
@@ -642,7 +655,7 @@ try:
       )
 
       df_detail = conn.execute(f"""
-                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS
+                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                 FROM v_inbound
                 {where_sql} {unrunsheet_status_clause} {aging_clause}
                 ORDER BY wus_aging_days DESC
@@ -685,46 +698,94 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-      # KPI Summary Cards
-      kpi_data = conn.execute(f"""
-                SELECT 
-                    COUNT(DISTINCT AWB) as total_ytd,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) as unrun_total,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) as total_success_unhrs_kpi,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) as total_undel_unhrs_kpi
-                FROM v_inbound {where_sql}
-            """).fetchdf()
+      # Helper function for calculating WoW trend for Success/Undel KPIs
+      def get_kpi_metrics(status_filter_sql, zona_filter_sql, aging_target_val):
+        # Current period (all records or filtered by sidebar)
+        curr_df = conn.execute(f"""
+                    SELECT 
+                        COUNT(DISTINCT AWB) as total_awb,
+                        COUNT(DISTINCT CASE WHEN {aging_target_val} THEN AWB END) as target_awb
+                    FROM v_inbound {where_sql} 
+                    AND {status_filter_sql} 
+                    AND {zona_filter_sql}
+                """).fetchdf()
 
-      t_ytd = kpi_data["total_ytd"][0] or 0
-      u_tot = kpi_data["unrun_total"][0] or 0
-      succ_unhrs_val = kpi_data["total_success_unhrs_kpi"][0] or 0
-      undel_unhrs_val = kpi_data["total_undel_unhrs_kpi"][0] or 0
+        tot = curr_df["total_awb"][0] or 0
+        tgt = curr_df["target_awb"][0] or 0
+        pct = (tgt / tot * 100.0) if tot > 0 else 0.0
+
+        # Previous week comparison (using WUS_DATE or TGL_UPDATE_STATUS_POD week-over-week)
+        prev_df = conn.execute(f"""
+                    SELECT 
+                        COUNT(DISTINCT AWB) as total_awb,
+                        COUNT(DISTINCT CASE WHEN {aging_target_val} THEN AWB END) as target_awb
+                    FROM v_inbound {where_sql} 
+                    AND {status_filter_sql} 
+                    AND {zona_filter_sql}
+                    AND CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE) >= CURRENT_DATE - INTERVAL 14 DAY
+                    AND CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE) < CURRENT_DATE - INTERVAL 7 DAY
+                """).fetchdf()
+
+        p_tot = prev_df["total_awb"][0] or 0
+        p_tgt = prev_df["target_awb"][0] or 0
+        p_pct = (p_tgt / p_tot * 100.0) if p_tot > 0 else 0.0
+
+        wow_diff = pct - p_pct
+        return tgt, pct, wow_diff
+
+      # Success UnHRS Zona A & B H+0
+      succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
+          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
+          aging_target_val="wus_aging_group = 'H+0'",
+      )
+
+      # Success UnHRS Zona C H+1
+      succ_c_vol, succ_c_pct, succ_c_wow = get_kpi_metrics(
+          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
+          aging_target_val="wus_aging_group = 'H+1'",
+      )
+
+      # Undel UnHRS Zona A & B H+0
+      undel_ab_vol, undel_ab_pct, undel_ab_wow = get_kpi_metrics(
+          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
+          aging_target_val="wus_aging_group = 'H+0'",
+      )
+
+      # Undel UnHRS Zona C H+1
+      undel_c_vol, undel_c_pct, undel_c_wow = get_kpi_metrics(
+          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
+          aging_target_val="wus_aging_group = 'H+1'",
+      )
 
       k1, k2, k3, k4 = st.columns(4)
       with k1:
         st.metric(
-            label="📦 Total Inbound YTD",
-            value=f"{t_ytd:,}",
-            delta="Filtered",
+            label="🎯 Success UnHRS (Zona A&B | H+0)",
+            value=f"{succ_ab_vol:,} AWB",
+            delta=f"{succ_ab_pct:.1f}% ({succ_ab_wow:+.1f}% WoW)",
         )
       with k2:
         st.metric(
-            label="🚨 Total UnRunsheet Aging",
-            value=f"{u_tot:,}",
-            delta="Active Alert",
-            delta_color="inverse",
+            label="🎯 Success UnHRS (Zona C | H+1)",
+            value=f"{succ_c_vol:,} AWB",
+            delta=f"{succ_c_pct:.1f}% ({succ_c_wow:+.1f}% WoW)",
         )
       with k3:
         st.metric(
-            label="🎯 Total Success UnHRS",
-            value=f"{succ_unhrs_val:,}",
-            delta="Target Z A&B: H+0",
+            label="⚠️ Undel UnHRS (Zona A&B | H+0)",
+            value=f"{undel_ab_vol:,} AWB",
+            delta=f"{undel_ab_pct:.1f}% ({undel_ab_wow:+.1f}% WoW)",
+            delta_color="inverse",
         )
       with k4:
         st.metric(
-            label="⚠️ Total Undel UnHRS",
-            value=f"{undel_unhrs_val:,}",
-            delta="Target Z C: H+1",
+            label="⚠️ Undel UnHRS (Zona C | H+1)",
+            value=f"{undel_c_vol:,} AWB",
+            delta=f"{undel_c_pct:.1f}% ({undel_c_wow:+.1f}% WoW)",
             delta_color="inverse",
         )
 
