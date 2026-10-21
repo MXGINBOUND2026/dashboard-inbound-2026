@@ -356,6 +356,8 @@ query_duckdb = f"""
         SELECT 
             COALESCE(w.AWB, '-') AS AWB,
             COALESCE(w.SERVICE, '-') AS SERVICE,
+            COALESCE(w.CODING, '-') AS CODING,
+            COALESCE(w.TGL_RECEIVED, '-') AS TGL_RECEIVED,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
             w.valid_inbound_date AS Last_Inbound,
             w.dt_update_pod AS TGL_UPDATE_STATUS_POD,
