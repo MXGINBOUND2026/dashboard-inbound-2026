@@ -3,6 +3,7 @@ import io
 import os
 import duckdb
 import pandas as pd
+import pydeck as pdk
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -98,7 +99,10 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 try:
   conn = duckdb.connect()
 
-  tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
+  # 4 Tab Navigasi Utama (Termasuk Tab Map UnRunsheet)
+  tab1, tab2, tab3 = st.tabs(
+      ["📊 Main Dashboard", "🔒 Summary Exec", "📍 Map UnRunsheet"]
+  )
 
   # =========================================================
   # TAB 1: MAIN DASHBOARD
@@ -654,7 +658,6 @@ try:
 
       st.markdown("---")
 
-      # GRAFIK TOTAL INBOUND TAHUN 2026 (TEMPLATE SESUAI REFERENSI: JUDUL DI TENGAH, AREA CHART, GARIS HALUS)
       st.subheader("📈 1. Grafik Total Inbound Per Tanggal (Tahun 2026)")
 
       col_gran, col_date = st.columns([1, 1])
@@ -776,7 +779,6 @@ try:
 
       st.markdown("---")
 
-      # FUNGSI RENDER PLOTLY TABLE MATRIX DENGAN URUTAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK
       def render_plotly_table_matrix(df_raw, csv_filename, download_label):
         if df_raw.empty:
           st.info("Tidak ada data.")
@@ -791,8 +793,6 @@ try:
 
         pivot = pivot[AGING_ORDER]
         pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
-
-        # URUTKAN CABANG BERDASARKAN GRAND TOTAL TERBANYAK DI ATAS (DESCENDING)
         pivot = pivot.sort_values(by="Grand Total", ascending=False)
 
         grand_total_row = pivot.sum(axis=0)
@@ -804,7 +804,6 @@ try:
         )
 
         headers = list(pivot_with_total.columns)
-
         cell_values = []
         for col in headers:
           if col == "Cabang":
@@ -821,23 +820,17 @@ try:
           col_color_list = []
           for row_idx in range(n_rows):
             if row_idx == n_rows - 1:
-              col_color_list.append("#222222")  # Baris Grand Total (Hitam)
+              col_color_list.append("#222222")
             elif col == "Cabang" or col == "Grand Total":
               col_color_list.append("#2a2a2a")
             else:
               val = pivot_with_total[col].iloc[row_idx]
               if col == "H+0":
-                col_color_list.append(
-                    "#28a745" if val > 0 else "#1e1e1e"
-                )  # Hijau
+                col_color_list.append("#28a745" if val > 0 else "#1e1e1e")
               elif col in ["H+1", "H+2"]:
-                col_color_list.append(
-                    "#ffc107" if val > 0 else "#1e1e1e"
-                )  # Kuning
+                col_color_list.append("#ffc107" if val > 0 else "#1e1e1e")
               elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
-                col_color_list.append(
-                    "#dc3545" if val > 0 else "#1e1e1e"
-                )  # Merah
+                col_color_list.append("#dc3545" if val > 0 else "#1e1e1e")
               else:
                 col_color_list.append("#1e1e1e")
           cell_colors.append(col_color_list)
@@ -896,13 +889,9 @@ try:
             mime="text/csv",
         )
 
-      # =========================================================
-      # MATRIX INFOGRAFIS 2: UNRUNSHEET PER CABANG
-      # =========================================================
       st.subheader(
           "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)"
       )
-
       df_unrun = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
@@ -910,28 +899,22 @@ try:
                   AND Cabang IN ('{cabang_filter_str}')
                 GROUP BY Cabang, aging_group
             """).fetchdf()
-
       render_plotly_table_matrix(
-          df_raw=df_unrun,
-          csv_filename="Matrix_UnRunsheet_Cabang.csv",
-          download_label="📥 Download Data Matrix UnRunsheet (CSV)",
+          df_run,
+          "Matrix_UnRunsheet_Cabang.csv",
+          "📥 Download Data Matrix UnRunsheet (CSV)",
       )
 
       st.markdown("---")
 
-      # =========================================================
-      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG
-      # =========================================================
       st.subheader(
           "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging"
           " TGL_UPDATE_STATUS_POD)"
       )
-
       df_succ = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM (
-                    SELECT 
-                        Cabang, 
+                    SELECT Cabang, 
                         CASE 
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
@@ -942,37 +925,29 @@ try:
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
                             ELSE '>H+7'
-                        END AS aging_group,
-                        AWB
+                        END AS aging_group, AWB
                     FROM read_parquet('{LOCAL_PARQUET_PATH}')
                     WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                       AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                       AND Cabang IN ('{cabang_filter_str}')
-                ) sub
-                GROUP BY Cabang, aging_group
+                ) sub GROUP BY Cabang, aging_group
             """).fetchdf()
-
       render_plotly_table_matrix(
-          df_raw=df_succ,
-          csv_filename="Matrix_Success_UnHRS_Cabang.csv",
-          download_label="📥 Download Data Matrix Success UnHRS (CSV)",
+          df_succ,
+          "Matrix_Success_UnHRS_Cabang.csv",
+          "📥 Download Data Matrix Success UnHRS (CSV)",
       )
 
       st.markdown("---")
 
-      # =========================================================
-      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG
-      # =========================================================
       st.subheader(
           "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging"
           " TGL_UPDATE_STATUS_POD)"
       )
-
       df_undel = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM (
-                    SELECT 
-                        Cabang, 
+                    SELECT Cabang, 
                         CASE 
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
@@ -983,20 +958,17 @@ try:
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
                             WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
                             ELSE '>H+7'
-                        END AS aging_group,
-                        AWB
+                        END AS aging_group, AWB
                     FROM read_parquet('{LOCAL_PARQUET_PATH}')
                     WHERE Status_Shipment = 'UNDELIVERY'
                       AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                       AND Cabang IN ('{cabang_filter_str}')
-                ) sub
-                GROUP BY Cabang, aging_group
+                ) sub GROUP BY Cabang, aging_group
             """).fetchdf()
-
       render_plotly_table_matrix(
-          df_raw=df_undel,
-          csv_filename="Matrix_Undel_UnHRS_Cabang.csv",
-          download_label="📥 Download Data Matrix Undel UnHRS (CSV)",
+          df_undel,
+          "Matrix_Undel_UnHRS_Cabang.csv",
+          "📥 Download Data Matrix Undel UnHRS (CSV)",
       )
 
     else:
@@ -1004,6 +976,93 @@ try:
           "🔒 Halaman Summary Exec Terkunci. Masukkan password yang benar pada"
           " sidebar untuk membuka."
       )
+
+  # =========================================================
+  # TAB 3: MAP UNRUNSHEET (KAB/KOTA MALANG & BLITAR & BATU)
+  # =========================================================
+  with tab3:
+    st.subheader(
+        "📍 Peta Interaktif Sebaran UnRunsheet per Kecamatan (Malang Raya &"
+        " Blitar Raya)"
+    )
+    st.caption(
+        "Menampilkan visualisasi titik berat volume UnRunsheet berdasarkan"
+        " koordinat kecamatan."
+    )
+
+    # Ambil data kecamatan unrunsheet beserta perkiraan koordinat statis/dinamis ringan
+    df_map_raw = conn.execute(f"""
+            iran = SELECT Kecamatan, COUNT(DISTINCT AWB) AS total_unrun
+            FROM read_parquet('{LOCAL_PARQUET_PATH}')
+            WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+              AND Kecamatan IS NOT NULL
+            GROUP BY Kecamatan
+        """).fetchdf()
+
+    if not df_map_raw.empty:
+      # Mapping koordinat dummy/aktual ringan untuk wilayah Malang Raya & Blitar Raya
+      # (Mencegah beban berat geodata/geojson, menggunakan koordinat titik kecamatan yang efisien)
+      coords_map = {
+          "MALANG": [-7.9666, 112.6326],
+          "KEPANJEN": [-8.1308, 112.5693],
+          "BATU": [-7.8767, 112.5234],
+          "BLITAR": [-8.0954, 112.1627],
+          "TUREN": [-8.1691, 112.6953],
+          "BULULAWANG": [-8.0475, 112.6394],
+          "BLIMBING": [-7.9546, 112.6481],
+          "LOWOKWARU": [-7.9463, 112.6155],
+          "KLOJEN": [-7.9785, 112.6316],
+          "SUKUN": [-8.0003, 112.6183],
+          "KEDUNGKANDANG": [-7.9942, 112.6568],
+      }
+
+      lat_list, lon_list, size_list = [], [], []
+      for idx, row in df_map_raw.iterrows():
+        kec = str(row["Kecamatan"]).upper().strip()
+        # Default koordinat Malang jika kecamatan tidak ter-mapping spesifik
+        lat_lon = coords_map.get(
+            kec, [-7.9839 + (idx * 0.01), 112.6214 + (idx * 0.01)]
+        )
+        lat_list.append(lat_lon[0])
+        lon_list.append(lat_lon[1])
+        # Skala ukuran radius titik peta proporsional
+        size_list.append(max(float(row["total_unrun"]) * 3, 500))
+
+      df_map_raw["lat"] = lat_list
+      df_map_raw["lon"] = lon_list
+      df_map_raw["radius"] = size_list
+
+      # Render PyDeck Map yang sangat ringan di RAM
+      layer = pdk.Layer(
+          "ScatterplotLayer",
+          data=df_map_raw,
+          get_position=["lon", "lat"],
+          get_color=[220, 53, 69, 160],  # Warna merah transparan (Alert UnRunsheet)
+          get_radius="radius",
+          pickable=True,
+          auto_highlight=True,
+      )
+
+      # Titik Center Malang Raya
+      view_state = pdk.ViewState(
+          latitude=-7.9666, longitude=112.6326, zoom=10, pitch=30
+      )
+
+      r = pdk.Deck(
+          layers=[layer],
+          initial_view_state=view_state,
+          tooltip={
+              "html": "<b>Kecamatan:</b> {Kecamatan}<br/><b>Total UnRunsheet:</b> {total_unrun}",
+              "style": {"backgroundColor": "steelblue", "color": "white"},
+          },
+          map_style="mapbox://styles/mapbox/dark-v10",
+      )
+
+      st.pydeck_chart(r)
+
+      st.dataframe(df_map_raw[["Kecamatan", "total_unrun"]], use_container_width=True)
+    else:
+      st.info("Tidak ada data geolokasi UnRunsheet untuk ditampilkan.")
 
 except Exception as main_err:
   st.error("⚠️ Terjadi masalah saat mengolah data dashboard:")
