@@ -4,6 +4,7 @@ import os
 import duckdb
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -17,6 +18,8 @@ st.title("🚚 Database Inbound 2026")
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 OUTPUT_PARQUET_NAME = "data_inbound_2026.parquet"
 LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
+
+AGING_ORDER = ["H+0", "H+1", "H+2", "H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]
 
 
 def get_drive_service():
@@ -491,6 +494,8 @@ try:
                   type="category",
                   tickangle=0,
                   gridcolor="rgba(255, 255, 255, 0.05)",
+                  categoryorder="array",
+                  categoryarray=AGING_ORDER,
               ),
               yaxis=dict(gridcolor="rgba(255, 255, 255, 0.08)"),
               margin=dict(l=20, r=20, t=30, b=20),
@@ -750,8 +755,82 @@ try:
 
       st.markdown("---")
 
+      # Fungsi Helper Pembuat Matrix Heatmap Berurutan (Posisi X-Axis di Atas)
+      def create_sorted_heatmap(
+          df,
+          x_col,
+          y_col,
+          z_col,
+          title,
+          colorscale,
+          csv_filename,
+          download_label,
+      ):
+        if df.empty:
+          st.info(f"Tidak ada data {title}.")
+          return
+
+        pivot_df = df.pivot(
+            index=y_col, columns=x_col, values=z_col
+        ).fillna(0)
+        for col in AGING_ORDER:
+          if col not in pivot_df.columns:
+            pivot_df[col] = 0
+        pivot_df = pivot_df[AGING_ORDER]
+
+        # Penyesuaian Kontras Warna Terkait Tingkat Aging (Semakin tua semakin pekat)
+        weighted_values = pivot_df.values.copy()
+        for idx, col in enumerate(AGING_ORDER):
+          multiplier = 1.0 + (idx * 0.35)
+          weighted_values[:, idx] = weighted_values[:, idx] * multiplier
+
+        text_values = [
+            [f"{int(val):,}" for val in row] for row in pivot_df.values
+        ]
+
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=weighted_values,
+                x=AGING_ORDER,
+                y=pivot_df.index,
+                colorscale=colorscale,
+                text=text_values,
+                texttemplate="%{text}",
+                textfont={"size": 11},
+                hoverinfo="x+y+text",
+                showscale=False,
+            )
+        )
+
+        fig.update_layout(
+            title=title,
+            xaxis=dict(
+                title="Aging (Urut Terdaun ke Tertua)",
+                type="category",
+                categoryorder="array",
+                categoryarray=AGING_ORDER,
+                side="top",  # Posisi sumbu X dipindah ke atas
+            ),
+            yaxis=dict(title="Cabang", autorange="reversed"),
+            plot_bgcolor="rgba(40, 40, 40, 0.8)",
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            font=dict(color="#CCCCCC", size=12),
+            height=350,
+            margin=dict(l=40, r=40, t=70, b=40),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        csv_data = pivot_df.reset_index().to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label=download_label,
+            data=csv_data,
+            file_name=csv_filename,
+            mime="text/csv",
+        )
+
       # =========================================================
-      # MATRIX INFOGRAFIS 2: UNRUNSHEET PER CABANG (HEATMAP INTERAKTIF)
+      # MATRIX INFOGRAFIS 2: UNRUNSHEET PER CABANG
       # =========================================================
       st.subheader(
           "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)"
@@ -765,46 +844,21 @@ try:
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      if not df_unrun_heat.empty:
-        fig_mat_unrun = px.density_heatmap(
-            df_unrun_heat,
-            x="aging_group",
-            y="Cabang",
-            z="total_awb",
-            color_continuous_scale="Blues",
-            text_auto=True,
-            title="Heatmap Matrix UnRunsheet Per Cabang",
-            labels={
-                "aging_group": "Aging Group",
-                "Cabang": "Cabang",
-                "total_awb": "Total AWB",
-            },
-        )
-        fig_mat_unrun.update_layout(
-            plot_bgcolor="rgba(40, 40, 40, 0.8)",
-            paper_bgcolor="rgba(0, 0, 0, 0)",
-            font=dict(color="#CCCCCC", size=12),
-        )
-        st.plotly_chart(fig_mat_unrun, use_container_width=True)
-
-        # Download CSV pendukung
-        pivot_unrun = df_unrun_heat.pivot(
-            index="Cabang", columns="aging_group", values="total_awb"
-        ).fillna(0)
-        csv_unrun = pivot_unrun.reset_index().to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Download Data Matrix UnRunsheet (CSV)",
-            data=csv_unrun,
-            file_name="Matrix_UnRunsheet_Cabang.csv",
-            mime="text/csv",
-        )
-      else:
-        st.info("Tidak ada data UnRunsheet per cabang.")
+      create_sorted_heatmap(
+          df=df_unrun_heat,
+          x_col="aging_group",
+          y_col="Cabang",
+          z_col="total_awb",
+          title="Heatmap Matrix UnRunsheet Per Cabang",
+          colorscale="Blues",
+          csv_filename="Matrix_UnRunsheet_Cabang.csv",
+          download_label="📥 Download Data Matrix UnRunsheet (CSV)",
+      )
 
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG (HEATMAP INTERAKTIF)
+      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG
       # =========================================================
       st.subheader(
           "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging"
@@ -833,45 +887,21 @@ try:
                 GROUP BY Cabang, aging_pod
             """).fetchdf()
 
-      if not df_succ_heat.empty:
-        fig_mat_succ = px.density_heatmap(
-            df_succ_heat,
-            x="aging_pod",
-            y="Cabang",
-            z="total_awb",
-            color_continuous_scale="Greens",
-            text_auto=True,
-            title="Heatmap Matrix Success UnHRS Per Cabang",
-            labels={
-                "aging_pod": "Aging POD",
-                "Cabang": "Cabang",
-                "total_awb": "Total AWB",
-            },
-        )
-        fig_mat_succ.update_layout(
-            plot_bgcolor="rgba(40, 40, 40, 0.8)",
-            paper_bgcolor="rgba(0, 0, 0, 0)",
-            font=dict(color="#CCCCCC", size=12),
-        )
-        st.plotly_chart(fig_mat_succ, use_container_width=True)
-
-        pivot_succ = df_succ_heat.pivot(
-            index="Cabang", columns="aging_pod", values="total_awb"
-        ).fillna(0)
-        csv_succ = pivot_succ.reset_index().to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Download Data Matrix Success UnHRS (CSV)",
-            data=csv_succ,
-            file_name="Matrix_Success_UnHRS_Cabang.csv",
-            mime="text/csv",
-        )
-      else:
-        st.info("Tidak ada data Success UnHRS per cabang.")
+      create_sorted_heatmap(
+          df=df_succ_heat,
+          x_col="aging_pod",
+          y_col="Cabang",
+          z_col="total_awb",
+          title="Heatmap Matrix Success UnHRS Per Cabang",
+          colorscale="Greens",
+          csv_filename="Matrix_Success_UnHRS_Cabang.csv",
+          download_label="📥 Download Data Matrix Success UnHRS (CSV)",
+      )
 
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG (HEATMAP INTERAKTIF)
+      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG
       # =========================================================
       st.subheader(
           "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging"
@@ -900,40 +930,16 @@ try:
                 GROUP BY Cabang, aging_pod
             """).fetchdf()
 
-      if not df_undel_heat.empty:
-        fig_mat_undel = px.density_heatmap(
-            df_undel_heat,
-            x="aging_pod",
-            y="Cabang",
-            z="total_awb",
-            color_continuous_scale="Oranges",
-            text_auto=True,
-            title="Heatmap Matrix Undel UnHRS Per Cabang",
-            labels={
-                "aging_pod": "Aging POD",
-                "Cabang": "Cabang",
-                "total_awb": "Total AWB",
-            },
-        )
-        fig_mat_undel.update_layout(
-            plot_bgcolor="rgba(40, 40, 40, 0.8)",
-            paper_bgcolor="rgba(0, 0, 0, 0)",
-            font=dict(color="#CCCCCC", size=12),
-        )
-        st.plotly_chart(fig_mat_undel, use_container_width=True)
-
-        pivot_undel = df_undel_heat.pivot(
-            index="Cabang", columns="aging_pod", values="total_awb"
-        ).fillna(0)
-        csv_undel = pivot_undel.reset_index().to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Download Data Matrix Undel UnHRS (CSV)",
-            data=csv_undel,
-            file_name="Matrix_Undel_UnHRS_Cabang.csv",
-            mime="text/csv",
-        )
-      else:
-        st.info("Tidak ada data Undel UnHRS per cabang.")
+      create_sorted_heatmap(
+          df=df_undel_heat,
+          x_col="aging_pod",
+          y_col="Cabang",
+          z_col="total_awb",
+          title="Heatmap Matrix Undel UnHRS Per Cabang",
+          colorscale="Oranges",
+          csv_filename="Matrix_Undel_UnHRS_Cabang.csv",
+          download_label="📥 Download Data Matrix Undel UnHRS (CSV)",
+      )
 
     else:
       st.warning(
