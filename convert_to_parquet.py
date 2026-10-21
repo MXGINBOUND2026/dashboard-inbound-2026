@@ -217,6 +217,7 @@ query_duckdb = f"""
                 main.TGL_UPDATE_STATUS_POD,
                 main.WUS_DATE,
                 main.BILNOTE_AMOUNT,
+                main.RUNSHEET_COURIER_NAME,
                 ref.POD_Category AS raw_pod_category,
                 ref.POD_DESC
             FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
@@ -359,7 +360,8 @@ query_duckdb = f"""
             w.valid_inbound_date AS Last_Inbound,
             w.dt_update_pod AS TGL_UPDATE_STATUS_POD,
             w.dt_wus AS WUS_DATE,
-            w.BILNOTE_AMOUNT AS BILNOTE_AMOUNT,
+            COALESCE(w.BILNOTE_AMOUNT, 0) AS BILNOTE_AMOUNT,
+            COALESCE(w.RUNSHEET_COURIER_NAME, '-') AS RUNSHEET_COURIER_NAME,
             CASE 
                 WHEN w.BILNOTE_AMOUNT IS NOT NULL AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '' AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '0' 
                 THEN 'COD' 
