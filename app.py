@@ -83,7 +83,7 @@ if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.success("Cache dibersihkan! Mengunduh file terbaru...")
   st.rerun()
 
-# Tombol / Akses Password Tab Summary
+# Tombol Input Password Tab Summary
 st.sidebar.markdown("---")
 st.sidebar.header("🔒 Akses Fitur Summary Exec")
 summary_pass = st.sidebar.text_input(
@@ -98,9 +98,12 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 try:
   conn = duckdb.connect()
 
-  # Tab Navigasi Dashboard
+  # Tab Navigasi Utama
   tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
 
+  # =========================================================
+  # TAB 1: MAIN DASHBOARD
+  # =========================================================
   with tab1:
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Filter Data Dashboard")
@@ -203,17 +206,23 @@ try:
       )
 
     if chosen_loc:
-      where_clauses.append(f"LAST_LOCATION IN ('{"','".join(chosen_loc)}')")
+      loc_str = "','".join(chosen_loc)
+      where_clauses.append(f"LAST_LOCATION IN ('{loc_str}')")
     if chosen_cabang:
-      where_clauses.append(f"Cabang IN ('{"','".join(chosen_cabang)}')")
+      cab_str = "','".join(chosen_cabang)
+      where_clauses.append(f"Cabang IN ('{cab_str}')")
     if chosen_zona:
-      where_clauses.append(f"Zona IN ('{"','".join(chosen_zona)}')")
+      zon_str = "','".join(chosen_zona)
+      where_clauses.append(f"Zona IN ('{zon_str}')")
     if chosen_kecamatan:
-      where_clauses.append(f"Kecamatan IN ('{"','".join(chosen_kecamatan)}')")
+      kec_str = "','".join(chosen_kecamatan)
+      where_clauses.append(f"Kecamatan IN ('{kec_str}')")
     if chosen_status:
-      where_clauses.append(f"Status_Shipment IN ('{"','".join(chosen_status)}')")
+      stat_str = "','".join(chosen_status)
+      where_clauses.append(f"Status_Shipment IN ('{stat_str}')")
     if chosen_hrs:
-      where_clauses.append(f"HRS IN ('{"','".join(chosen_hrs)}')")
+      hrs_str = "','".join(chosen_hrs)
+      where_clauses.append(f"HRS IN ('{hrs_str}')")
 
     where_sql = (
         "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
@@ -267,7 +276,7 @@ try:
     if "active_card_filter" not in st.session_state:
       st.session_state.active_card_filter = None
 
-    # Metric Cards (4 Utama)
+    # Metric Cards Utama
     metrics_res = conn.execute(f"""
             SELECT 
                 COUNT(DISTINCT AWB) AS total_awb,
@@ -368,7 +377,7 @@ try:
 
     st.markdown("---")
 
-    # Tabel Detail Berdasarkan Klik Metric Card
+    # Tabel Detail Berdasarkan Klik Card
     if st.session_state.active_card_filter:
       card_title = st.session_state.active_card_filter
       st.subheader(
@@ -611,12 +620,13 @@ try:
       else:
         st.info("Tidak ada data UnInbound.")
 
-  # TAB 2: SUMMARY EXEC (TERKUNCI PASSWORD)
+  # =========================================================
+  # TAB 2: SUMMARY EXEC (PROTECTED PASSWORD = MXG125)
+  # =========================================================
   with tab2:
     if summary_pass == "MXG125":
       st.title("📊 Executive Summary & Performance Analytics")
 
-      # Target Cabang
       target_cabang = [
           "Malang",
           "Batu",
@@ -651,16 +661,62 @@ try:
 
       st.markdown("---")
 
-      # 2. Grafik Total Inbound Per Tanggal
-      st.subheader("📈 1. Grafik Total Inbound Per Tanggal")
-      granularity = st.radio(
-          "Pilih Granularitas Waktu:",
-          ["Hari", "Week (Minggu)", "Bulan"],
-          horizontal=True,
+      # 2. Grafik Total Inbound Per Tanggal (STRICT TAHUN 2026 & FILTER RENTANG TANGGAL)
+      st.subheader("📈 1. Grafik Total Inbound Per Tanggal (Tahun 2026)")
+
+      col_gran, col_date = st.columns([1, 1])
+
+      with col_gran:
+        granularity = st.radio(
+            "Pilih Granularitas Waktu:",
+            ["Hari", "Week (Minggu)", "Bulan"],
+            horizontal=True,
+        )
+
+      # Ambil Min & Max Date Tahun 2026 dari Inbound Date
+      min_max_inbound_2026 = conn.execute(f"""
+                SELECT 
+                    MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as min_d, 
+                    MAX(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as max_d 
+                FROM read_parquet('{LOCAL_PARQUET_PATH}') 
+                WHERE EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+            """).fetchdf()
+
+      inbound_start = (
+          min_max_inbound_2026["min_d"][0]
+          if not min_max_inbound_2026.empty
+          and pd.notnull(min_max_inbound_2026["min_d"][0])
+          else datetime.date(2026, 1, 1)
       )
+      inbound_end = (
+          min_max_inbound_2026["max_d"][0]
+          if not min_max_inbound_2026.empty
+          and pd.notnull(min_max_inbound_2026["max_d"][0])
+          else datetime.date(2026, 12, 31)
+      )
+
+      with col_date:
+        inbound_date_range = st.date_input(
+            "📅 Filter Rentang Tanggal (Inbound 2026):",
+            value=(inbound_start, inbound_end),
+            min_value=datetime.date(2026, 1, 1),
+            max_value=datetime.date(2026, 12, 31),
+        )
+
+      inbound_date_clause = ""
+      if (
+          isinstance(inbound_date_range, tuple)
+          and len(inbound_date_range) == 2
+      ):
+        s_date, e_date = inbound_date_range
+        inbound_date_clause = f"AND CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE) BETWEEN '{s_date}' AND '{e_date}'"
 
       if granularity == "Hari":
         date_expr = (
+            "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
+            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b')"
+        )
+        sort_expr = (
             "CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE"
             " '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)"
         )
@@ -668,22 +724,32 @@ try:
         date_expr = (
             "'Week ' || STRFTIME(COALESCE(dt_im, CASE WHEN"
             " UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL"
-            " END), '%W (%Y)')"
+            " END), '%W')"
+        )
+        sort_expr = (
+            "MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
+            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE))"
         )
       else:
         date_expr = (
             "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
-            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%Y-%m')"
+            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%B')"
+        )
+        sort_expr = (
+            "MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
+            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE))"
         )
 
       df_inbound_trend = conn.execute(f"""
                 SELECT 
                     {date_expr} AS periode,
-                    COUNT(DISTINCT AWB) AS total_awb
+                    COUNT(DISTINCT AWB) AS total_awb,
+                    {sort_expr} as sort_key
                 FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE (dt_im IS NOT NULL OR (dt_hvi IS NOT NULL AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%'))
+                WHERE EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                  {inbound_date_clause}
                 GROUP BY 1
-                ORDER BY 1
+                ORDER BY sort_key ASC
             """).fetchdf()
 
       if not df_inbound_trend.empty:
@@ -692,120 +758,217 @@ try:
             x="periode",
             y="total_awb",
             markers=True,
-            title="Tren Total Inbound AWB",
+            title="Tren Total Inbound AWB (Tahun 2026)",
+            labels={"periode": "Periode Tanggal", "total_awb": "Total AWB"},
         )
         fig_inbound.update_traces(line_color="#1f77b4", line_width=3)
         st.plotly_chart(fig_inbound, use_container_width=True)
+      else:
+        st.info("Tidak ada data Inbound untuk rentang tanggal 2026 tersebut.")
 
       st.markdown("---")
 
-      # 3. Grafik Total UnRunsheet Per Cabang (Aging Last_Inbound)
+      # =========================================================
+      # MATRIX INFOGRAFIS 2: UNRUNSHEET PER CABANG
+      # =========================================================
       st.subheader(
-          "🚨 2. Grafik UnRunsheet Per Cabang (Aging Last_Inbound ke Hari Ini)"
+          "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)"
       )
-      df_unrunsheet_cab = conn.execute(f"""
-                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
-                  AND Cabang IN ('{cabang_filter_str}')
-                GROUP BY Cabang, aging_group
-                ORDER BY Cabang, aging_group
+
+      pivot_unrun = conn.execute(f"""
+                PIVOT (
+                    SELECT Cabang, aging_group, AWB 
+                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                      AND Cabang IN ('{cabang_filter_str}')
+                )
+                ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                USING COUNT(DISTINCT AWB)
+                GROUP BY Cabang
             """).fetchdf()
 
-      if not df_unrunsheet_cab.empty:
-        fig_unrun = px.bar(
-            df_unrunsheet_cab,
-            x="Cabang",
-            y="total_awb",
-            color="aging_group",
-            barmode="group",
-            text="total_awb",
-            title="UnRunsheet Per Cabang Berdasarkan Aging",
+      if not pivot_unrun.empty:
+        pivot_unrun = pivot_unrun.fillna(0)
+        all_agings = [
+            "H+0",
+            "H+1",
+            "H+2",
+            "H+3",
+            "H+4",
+            "H+5",
+            "H+6",
+            "H+7",
+            ">H+7",
+        ]
+        for col in all_agings:
+          if col not in pivot_unrun.columns:
+            pivot_unrun[col] = 0
+
+        pivot_unrun = pivot_unrun[["Cabang"] + all_agings]
+        pivot_unrun["Grand Total"] = pivot_unrun[all_agings].sum(axis=1)
+
+        st.dataframe(
+            pivot_unrun.style.background_gradient(
+                cmap="Blues", subset=all_agings
+            ).format({col: "{:,.0f}" for col in all_agings + ["Grand Total"]}),
+            use_container_width=True,
         )
-        st.plotly_chart(fig_unrun, use_container_width=True)
+
+        csv_unrun = pivot_unrun.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Matrix UnRunsheet (CSV)",
+            data=csv_unrun,
+            file_name="Matrix_UnRunsheet_Cabang.csv",
+            mime="text/csv",
+        )
+      else:
+        st.info("Tidak ada data UnRunsheet per cabang.")
 
       st.markdown("---")
 
-      # 4. Grafik Success UnHRS Per Cabang (Aging TGL_UPDATE_POD)
+      # =========================================================
+      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG
+      # =========================================================
       st.subheader(
-          "✅ 3. Grafik Success UnHRS Per Cabang (Aging TGL_UPDATE_POD ke Hari"
-          " Ini)"
+          "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging"
+          " TGL_UPDATE_STATUS_POD)"
       )
-      df_succ_unhrs_cab = conn.execute(f"""
-                SELECT 
-                    Cabang, 
-                    CASE 
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END AS aging_pod,
-                    COUNT(DISTINCT AWB) AS total_awb
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                  AND Cabang IN ('{cabang_filter_str}')
-                GROUP BY Cabang, aging_pod
-                ORDER BY Cabang, aging_pod
+
+      pivot_succ = conn.execute(f"""
+                PIVOT (
+                    SELECT 
+                        Cabang, 
+                        CASE 
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
+                            ELSE '>H+7'
+                        END AS aging_pod,
+                        AWB
+                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                      AND Cabang IN ('{cabang_filter_str}')
+                )
+                ON aging_pod IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                USING COUNT(DISTINCT AWB)
+                GROUP BY Cabang
             """).fetchdf()
 
-      if not df_succ_unhrs_cab.empty:
-        fig_succ = px.bar(
-            df_succ_unhrs_cab,
-            x="Cabang",
-            y="total_awb",
-            color="aging_pod",
-            barmode="group",
-            text="total_awb",
-            title="Success UnHRS Per Cabang",
+      if not pivot_succ.empty:
+        pivot_succ = pivot_succ.fillna(0)
+        all_agings = [
+            "H+0",
+            "H+1",
+            "H+2",
+            "H+3",
+            "H+4",
+            "H+5",
+            "H+6",
+            "H+7",
+            ">H+7",
+        ]
+        for col in all_agings:
+          if col not in pivot_succ.columns:
+            pivot_succ[col] = 0
+
+        pivot_succ = pivot_succ[["Cabang"] + all_agings]
+        pivot_succ["Grand Total"] = pivot_succ[all_agings].sum(axis=1)
+
+        st.dataframe(
+            pivot_succ.style.background_gradient(
+                cmap="Greens", subset=all_agings
+            ).format({col: "{:,.0f}" for col in all_agings + ["Grand Total"]}),
+            use_container_width=True,
         )
-        st.plotly_chart(fig_succ, use_container_width=True)
+
+        csv_succ = pivot_succ.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Matrix Success UnHRS (CSV)",
+            data=csv_succ,
+            file_name="Matrix_Success_UnHRS_Cabang.csv",
+            mime="text/csv",
+        )
+      else:
+        st.info("Tidak ada data Success UnHRS per cabang.")
 
       st.markdown("---")
 
-      # 5. Grafik Undel UnHRS Per Cabang (Aging TGL_UPDATE_POD)
+      # =========================================================
+      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG
+      # =========================================================
       st.subheader(
-          "❌ 4. Grafik Undel UnHRS Per Cabang (Aging TGL_UPDATE_POD ke Hari Ini)"
+          "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging"
+          " TGL_UPDATE_STATUS_POD)"
       )
-      df_undel_unhrs_cab = conn.execute(f"""
-                SELECT 
-                    Cabang, 
-                    CASE 
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END AS aging_pod,
-                    COUNT(DISTINCT AWB) AS total_awb
-                FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                WHERE Status_Shipment = 'UNDELIVERY'
-                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                  AND Cabang IN ('{cabang_filter_str}')
-                GROUP BY Cabang, aging_pod
-                ORDER BY Cabang, aging_pod
+
+      pivot_undel = conn.execute(f"""
+                PIVOT (
+                    SELECT 
+                        Cabang, 
+                        CASE 
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
+                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
+                            ELSE '>H+7'
+                        END AS aging_pod,
+                        AWB
+                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                    WHERE Status_Shipment = 'UNDELIVERY'
+                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                      AND Cabang IN ('{cabang_filter_str}')
+                )
+                ON aging_pod IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                USING COUNT(DISTINCT AWB)
+                GROUP BY Cabang
             """).fetchdf()
 
-      if not df_undel_unhrs_cab.empty:
-        fig_undel = px.bar(
-            df_undel_unhrs_cab,
-            x="Cabang",
-            y="total_awb",
-            color="aging_pod",
-            barmode="group",
-            text="total_awb",
-            title="Undel UnHRS Per Cabang",
+      if not pivot_undel.empty:
+        pivot_undel = pivot_undel.fillna(0)
+        all_agings = [
+            "H+0",
+            "H+1",
+            "H+2",
+            "H+3",
+            "H+4",
+            "H+5",
+            "H+6",
+            "H+7",
+            ">H+7",
+        ]
+        for col in all_agings:
+          if col not in pivot_undel.columns:
+            pivot_undel[col] = 0
+
+        pivot_undel = pivot_undel[["Cabang"] + all_agings]
+        pivot_undel["Grand Total"] = pivot_undel[all_agings].sum(axis=1)
+
+        st.dataframe(
+            pivot_undel.style.background_gradient(
+                cmap="Oranges", subset=all_agings
+            ).format({col: "{:,.0f}" for col in all_agings + ["Grand Total"]}),
+            use_container_width=True,
         )
-        st.plotly_chart(fig_undel, use_container_width=True)
+
+        csv_undel = pivot_undel.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Matrix Undel UnHRS (CSV)",
+            data=csv_undel,
+            file_name="Matrix_Undel_UnHRS_Cabang.csv",
+            mime="text/csv",
+        )
+      else:
+        st.info("Tidak ada data Undel UnHRS per cabang.")
 
     else:
       st.warning(
