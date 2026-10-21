@@ -331,7 +331,6 @@ try:
 
     st.markdown("---")
 
-    # Metric Cards Tambahan
     metrics_custom = conn.execute(f"""
             SELECT 
                 COUNT(DISTINCT CASE 
@@ -377,7 +376,6 @@ try:
 
     st.markdown("---")
 
-    # Tabel Detail Berdasarkan Klik Card
     if st.session_state.active_card_filter:
       card_title = st.session_state.active_card_filter
       st.subheader(
@@ -523,7 +521,6 @@ try:
 
       st.markdown("---")
 
-      # Tabel Matrix Status Shipment
       st.subheader(
           "📊 Tabel Matrix Status Shipment (Filter Aging:"
           f" [{selected_aging_group}])"
@@ -551,7 +548,6 @@ try:
 
       st.markdown("---")
 
-      # Tabel Pivot Unrunsheet
       st.subheader(
           "🗂️ Unrunsheet By Last Location (Filter Aging:"
           f" [{selected_aging_group}])"
@@ -580,7 +576,6 @@ try:
       else:
         st.info("Tidak ada data Unrunsheet.")
 
-      # Detail Data Table
       st.subheader(
           f"📋 Detail AWB — Kategori Aging: [{selected_aging_group}]"
       )
@@ -756,49 +751,49 @@ try:
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 2: UNRUNSHEET PER CABANG
+      # MATRIX INFOGRAFIS 2: UNRUNSHEET PER CABANG (HEATMAP INTERAKTIF)
       # =========================================================
       st.subheader(
           "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)"
       )
 
-      pivot_unrun = conn.execute(f"""
-                PIVOT (
-                    SELECT Cabang, aging_group, AWB 
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
-                      AND Cabang IN ('{cabang_filter_str}')
-                )
-                ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
-                USING COUNT(DISTINCT AWB)
-                GROUP BY Cabang
+      df_unrun_heat = conn.execute(f"""
+                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
+                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                WHERE Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                  AND Cabang IN ('{cabang_filter_str}')
+                GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      if not pivot_unrun.empty:
-        pivot_unrun = pivot_unrun.fillna(0)
-        all_agings = [
-            "H+0",
-            "H+1",
-            "H+2",
-            "H+3",
-            "H+4",
-            "H+5",
-            "H+6",
-            "H+7",
-            ">H+7",
-        ]
-        for col in all_agings:
-          if col not in pivot_unrun.columns:
-            pivot_unrun[col] = 0
+      if not df_unrun_heat.empty:
+        fig_mat_unrun = px.density_heatmap(
+            df_unrun_heat,
+            x="aging_group",
+            y="Cabang",
+            z="total_awb",
+            color_continuous_scale="Blues",
+            text_auto=True,
+            title="Heatmap Matrix UnRunsheet Per Cabang",
+            labels={
+                "aging_group": "Aging Group",
+                "Cabang": "Cabang",
+                "total_awb": "Total AWB",
+            },
+        )
+        fig_mat_unrun.update_layout(
+            plot_bgcolor="rgba(40, 40, 40, 0.8)",
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            font=dict(color="#CCCCCC", size=12),
+        )
+        st.plotly_chart(fig_mat_unrun, use_container_width=True)
 
-        pivot_unrun = pivot_unrun[["Cabang"] + all_agings]
-        pivot_unrun["Grand Total"] = pivot_unrun[all_agings].sum(axis=1)
-
-        st.dataframe(pivot_unrun, use_container_width=True)
-
-        csv_unrun = pivot_unrun.to_csv(index=False).encode("utf-8")
+        # Download CSV pendukung
+        pivot_unrun = df_unrun_heat.pivot(
+            index="Cabang", columns="aging_group", values="total_awb"
+        ).fillna(0)
+        csv_unrun = pivot_unrun.reset_index().to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="📥 Download Matrix UnRunsheet (CSV)",
+            label="📥 Download Data Matrix UnRunsheet (CSV)",
             data=csv_unrun,
             file_name="Matrix_UnRunsheet_Cabang.csv",
             mime="text/csv",
@@ -809,64 +804,63 @@ try:
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG
+      # MATRIX INFOGRAFIS 3: SUCCESS UNHRS PER CABANG (HEATMAP INTERAKTIF)
       # =========================================================
       st.subheader(
           "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging"
           " TGL_UPDATE_STATUS_POD)"
       )
 
-      pivot_succ = conn.execute(f"""
-                PIVOT (
-                    SELECT 
-                        Cabang, 
-                        CASE 
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                            ELSE '>H+7'
-                        END AS aging_pod,
-                        AWB
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                      AND Cabang IN ('{cabang_filter_str}')
-                )
-                ON aging_pod IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
-                USING COUNT(DISTINCT AWB)
-                GROUP BY Cabang
+      df_succ_heat = conn.execute(f"""
+                SELECT 
+                    Cabang, 
+                    CASE 
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
+                        ELSE '>H+7'
+                    END AS aging_pod,
+                    COUNT(DISTINCT AWB) AS total_awb
+                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                WHERE Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                  AND Cabang IN ('{cabang_filter_str}')
+                GROUP BY Cabang, aging_pod
             """).fetchdf()
 
-      if not pivot_succ.empty:
-        pivot_succ = pivot_succ.fillna(0)
-        all_agings = [
-            "H+0",
-            "H+1",
-            "H+2",
-            "H+3",
-            "H+4",
-            "H+5",
-            "H+6",
-            "H+7",
-            ">H+7",
-        ]
-        for col in all_agings:
-          if col not in pivot_succ.columns:
-            pivot_succ[col] = 0
+      if not df_succ_heat.empty:
+        fig_mat_succ = px.density_heatmap(
+            df_succ_heat,
+            x="aging_pod",
+            y="Cabang",
+            z="total_awb",
+            color_continuous_scale="Greens",
+            text_auto=True,
+            title="Heatmap Matrix Success UnHRS Per Cabang",
+            labels={
+                "aging_pod": "Aging POD",
+                "Cabang": "Cabang",
+                "total_awb": "Total AWB",
+            },
+        )
+        fig_mat_succ.update_layout(
+            plot_bgcolor="rgba(40, 40, 40, 0.8)",
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            font=dict(color="#CCCCCC", size=12),
+        )
+        st.plotly_chart(fig_mat_succ, use_container_width=True)
 
-        pivot_succ = pivot_succ[["Cabang"] + all_agings]
-        pivot_succ["Grand Total"] = pivot_succ[all_agings].sum(axis=1)
-
-        st.dataframe(pivot_succ, use_container_width=True)
-
-        csv_succ = pivot_succ.to_csv(index=False).encode("utf-8")
+        pivot_succ = df_succ_heat.pivot(
+            index="Cabang", columns="aging_pod", values="total_awb"
+        ).fillna(0)
+        csv_succ = pivot_succ.reset_index().to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="📥 Download Matrix Success UnHRS (CSV)",
+            label="📥 Download Data Matrix Success UnHRS (CSV)",
             data=csv_succ,
             file_name="Matrix_Success_UnHRS_Cabang.csv",
             mime="text/csv",
@@ -877,64 +871,63 @@ try:
       st.markdown("---")
 
       # =========================================================
-      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG
+      # MATRIX INFOGRAFIS 4: UNDEL UNHRS PER CABANG (HEATMAP INTERAKTIF)
       # =========================================================
       st.subheader(
           "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging"
           " TGL_UPDATE_STATUS_POD)"
       )
 
-      pivot_undel = conn.execute(f"""
-                PIVOT (
-                    SELECT 
-                        Cabang, 
-                        CASE 
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
-                            WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
-                            ELSE '>H+7'
-                        END AS aging_pod,
-                        AWB
-                    FROM read_parquet('{LOCAL_PARQUET_PATH}')
-                    WHERE Status_Shipment = 'UNDELIVERY'
-                      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                      AND Cabang IN ('{cabang_filter_str}')
-                )
-                ON aging_pod IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
-                USING COUNT(DISTINCT AWB)
-                GROUP BY Cabang
+      df_undel_heat = conn.execute(f"""
+                SELECT 
+                    Cabang, 
+                    CASE 
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', TGL_UPDATE_POD, CURRENT_TIMESTAMP) = 7 THEN 'H+7'
+                        ELSE '>H+7'
+                    END AS aging_pod,
+                    COUNT(DISTINCT AWB) AS total_awb
+                FROM read_parquet('{LOCAL_PARQUET_PATH}')
+                WHERE Status_Shipment = 'UNDELIVERY'
+                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                  AND Cabang IN ('{cabang_filter_str}')
+                GROUP BY Cabang, aging_pod
             """).fetchdf()
 
-      if not pivot_undel.empty:
-        pivot_undel = pivot_undel.fillna(0)
-        all_agings = [
-            "H+0",
-            "H+1",
-            "H+2",
-            "H+3",
-            "H+4",
-            "H+5",
-            "H+6",
-            "H+7",
-            ">H+7",
-        ]
-        for col in all_agings:
-          if col not in pivot_undel.columns:
-            pivot_undel[col] = 0
+      if not df_undel_heat.empty:
+        fig_mat_undel = px.density_heatmap(
+            df_undel_heat,
+            x="aging_pod",
+            y="Cabang",
+            z="total_awb",
+            color_continuous_scale="Oranges",
+            text_auto=True,
+            title="Heatmap Matrix Undel UnHRS Per Cabang",
+            labels={
+                "aging_pod": "Aging POD",
+                "Cabang": "Cabang",
+                "total_awb": "Total AWB",
+            },
+        )
+        fig_mat_undel.update_layout(
+            plot_bgcolor="rgba(40, 40, 40, 0.8)",
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            font=dict(color="#CCCCCC", size=12),
+        )
+        st.plotly_chart(fig_mat_undel, use_container_width=True)
 
-        pivot_undel = pivot_undel[["Cabang"] + all_agings]
-        pivot_undel["Grand Total"] = pivot_undel[all_agings].sum(axis=1)
-
-        st.dataframe(pivot_undel, use_container_width=True)
-
-        csv_undel = pivot_undel.to_csv(index=False).encode("utf-8")
+        pivot_undel = df_undel_heat.pivot(
+            index="Cabang", columns="aging_pod", values="total_awb"
+        ).fillna(0)
+        csv_undel = pivot_undel.reset_index().to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="📥 Download Matrix Undel UnHRS (CSV)",
+            label="📥 Download Data Matrix Undel UnHRS (CSV)",
             data=csv_undel,
             file_name="Matrix_Undel_UnHRS_Cabang.csv",
             mime="text/csv",
