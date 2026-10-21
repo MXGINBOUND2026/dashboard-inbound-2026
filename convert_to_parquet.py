@@ -356,7 +356,13 @@ query_duckdb = f"""
         SELECT 
             COALESCE(w.AWB, '-') AS AWB,
             COALESCE(w.SERVICE, '-') AS SERVICE,
-            COALESCE(w.CODING, '-') AS CODING,
+            -- Format kolom CODING agar menjadi D01, D02, dst.
+            CASE 
+                WHEN w.CODING IS NULL OR CAST(w.CODING AS VARCHAR) = '' OR CAST(w.CODING AS VARCHAR) = '-' THEN '-'
+                WHEN UPPER(CAST(w.CODING AS VARCHAR)) LIKE 'D%' THEN UPPER(CAST(w.CODING AS VARCHAR))
+                WHEN TRY_CAST(w.CODING AS INTEGER) IS NOT NULL THEN 'D' || LPAD(CAST(w.CODING AS VARCHAR), 2, '0')
+                ELSE CAST(w.CODING AS VARCHAR)
+            END AS CODING,
             COALESCE(w.TGL_RECEIVED, '-') AS TGL_RECEIVED,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
             w.valid_inbound_date AS Last_Inbound,
