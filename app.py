@@ -4,6 +4,7 @@ import os
 import duckdb
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -746,25 +747,13 @@ try:
 
       st.markdown("---")
 
-      # FUNGSI RENDER ST_DATAFRAME INTERAKTIF (DENGAN SORTING DI SETIAP KOLOM)
-      def style_aging_table(val, col_name):
-        if col_name == "H+0" and val > 0:
-          return "background-color: #28a745; color: white; font-weight: bold;"
-        elif col_name in ["H+1", "H+2"] and val > 0:
-          return "background-color: #ffc107; color: black; font-weight: bold;"
-        elif (
-            col_name in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"] and val > 0
-        ):
-          return "background-color: #dc3545; color: white; font-weight: bold;"
-        return ""
-
-      def render_sortable_colored_matrix(
-          df_raw, csv_filename, download_label
-      ):
+      # FUNGSI RENDER PLOTLY TABLE (WARNA BACKGROUND SEL + TOMBOL CAPTURE FOTO + DOWNLOAD CSV)
+      def render_plotly_table_matrix(df_raw, csv_filename, download_label):
         if df_raw.empty:
           st.info("Tidak ada data.")
           return
 
+        # PIVOT DATA
         pivot = df_raw.pivot(
             index="Cabang", columns="aging_group", values="total_awb"
         ).fillna(0)
@@ -783,30 +772,94 @@ try:
             columns={"index": "Cabang"}
         )
 
-        styled_df = pivot_with_total.style.apply(
-            lambda col: [
-                (
-                    style_aging_table(val, col.name)
-                    if row_idx != len(pivot_with_total) - 1
-                    else "font-weight: bold; background-color: #333333; color:"
-                    " white;"
-                )
-                for row_idx, val in enumerate(col)
-            ]
-            if col.name not in ["Cabang", "Grand Total"]
-            else [
-                (
-                    "font-weight: bold; background-color: #333333; color:"
-                    " white;"
-                    if row_idx == len(pivot_with_total) - 1
-                    else "font-weight: bold;"
-                )
-                for row_idx in range(len(col))
-            ],
-            axis=0,
-        ).format({col: "{:,.0f}" for col in AGING_ORDER + ["Grand Total"]})
+        headers = list(pivot_with_total.columns)
 
-        st.dataframe(styled_df, use_container_width=True)
+        # SUSUN TEXT NILAI SEL
+        cell_values = []
+        for col in headers:
+          if col == "Cabang":
+            cell_values.append(pivot_with_total[col].astype(str).tolist())
+          else:
+            cell_values.append([
+                f"{int(val):,}" for val in pivot_with_total[col].tolist()
+            ])
+
+        # SUSUN WARNA SEL BERDASARKAN THRESHOLD AGING
+        cell_colors = []
+        n_rows = len(pivot_with_total)
+
+        for col in headers:
+          col_color_list = []
+          for row_idx in range(n_rows):
+            if row_idx == n_rows - 1:
+              # Baris Grand Total (Hitam Pekat)
+              col_color_list.append("#222222")
+            elif col == "Cabang" or col == "Grand Total":
+              col_color_list.append("#2a2a2a")
+            else:
+              val = pivot_with_total[col].iloc[row_idx]
+              if col == "H+0":
+                col_color_list.append(
+                    "#28a745" if val > 0 else "#1e1e1e"
+                )  # Hijau
+              elif col in ["H+1", "H+2"]:
+                col_color_list.append(
+                    "#ffc107" if val > 0 else "#1e1e1e"
+                )  # Kuning
+              elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
+                col_color_list.append(
+                    "#dc3545" if val > 0 else "#1e1e1e"
+                )  # Merah
+              else:
+                col_color_list.append("#1e1e1e")
+          cell_colors.append(col_color_list)
+
+        # SUSUN WARNA TEKS
+        font_colors = []
+        for col in headers:
+          col_font_list = []
+          for row_idx in range(n_rows):
+            if row_idx == n_rows - 1:
+              col_font_list.append("#ffffff")
+            elif col in ["H+1", "H+2"]:
+              val = pivot_with_total[col].iloc[row_idx]
+              col_font_list.append("#000000" if val > 0 else "#ffffff")
+            else:
+              col_font_list.append("#ffffff")
+          font_colors.append(col_font_list)
+
+        fig_table = go.Figure(
+            data=[
+                go.Table(
+                    header=dict(
+                        values=[f"<b>{h}</b>" for h in headers],
+                        fill_color="#333333",
+                        align="center",
+                        font=dict(color="white", size=13),
+                        height=32,
+                    ),
+                    cells=dict(
+                        values=cell_values,
+                        fill_color=cell_colors,
+                        align=[
+                            "left" if h == "Cabang" else "center"
+                            for h in headers
+                        ],
+                        font=dict(color=font_colors, size=12),
+                        height=28,
+                    ),
+                )
+            ]
+        )
+
+        fig_table.update_layout(
+            margin=dict(l=10, r=10, t=10, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            height=280,
+        )
+
+        st.plotly_chart(fig_table, use_container_width=True)
 
         csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -831,7 +884,7 @@ try:
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      render_sortable_colored_matrix(
+      render_plotly_table_matrix(
           df_raw=df_unrun,
           csv_filename="Matrix_UnRunsheet_Cabang.csv",
           download_label="📥 Download Data Matrix UnRunsheet (CSV)",
@@ -872,7 +925,7 @@ try:
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      render_sortable_colored_matrix(
+      render_plotly_table_matrix(
           df_raw=df_succ,
           csv_filename="Matrix_Success_UnHRS_Cabang.csv",
           download_label="📥 Download Data Matrix Success UnHRS (CSV)",
@@ -913,7 +966,7 @@ try:
                 GROUP BY Cabang, aging_group
             """).fetchdf()
 
-      render_sortable_colored_matrix(
+      render_plotly_table_matrix(
           df_raw=df_undel,
           csv_filename="Matrix_Undel_UnHRS_Cabang.csv",
           download_label="📥 Download Data Matrix Undel UnHRS (CSV)",
@@ -928,4 +981,3 @@ try:
 except Exception as main_err:
   st.error("⚠️ Terjadi masalah saat mengolah data dashboard:")
   st.exception(main_err)
-    
