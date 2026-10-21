@@ -495,7 +495,7 @@ try:
           card_query_filter = "1=1"
 
         df_card_detail = conn.execute(f"""
-                    SELECT AWB, Last_Inbound, WUS_DATE, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                    SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, wus_aging_days AS "Aging WUS (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                     FROM v_inbound
                     {where_sql} AND {card_query_filter}
                     ORDER BY wus_aging_days DESC
