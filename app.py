@@ -322,7 +322,7 @@ try:
 
   col_m1, col_m2 = st.columns(2)
   with col_m1:
-    st.metric(label="✅ Success UnHRS", value=f"{total_success_unhrs:,}")
+    st.metric(label="⚠️ Success UnHRS", value=f"{total_success_unhrs:,}")
     if st.button(
         "📋 Lihat Detail Success UnHRS",
         key="btn_success_unhrs",
