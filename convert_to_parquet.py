@@ -380,7 +380,6 @@ query_duckdb = f"""
             w.Status_Shipment AS Status_Shipment,
             w.HRS AS HRS,
             
-            -- Aging UnRunsheet / Inbound biasa (Last_Inbound ke Hari Ini)
             CASE 
                 WHEN w.valid_inbound_date IS NOT NULL THEN 
                     DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE)
@@ -392,7 +391,6 @@ query_duckdb = f"""
             COALESCE(w.POD_Category, '-') AS POD_Category,
             COALESCE(w.POD_DESC, '-') AS POD_DESC,
             
-            -- aging_group (Last_Inbound ke Hari Ini)
             CASE 
                 WHEN w.valid_inbound_date IS NOT NULL THEN
                     CASE 
@@ -421,7 +419,6 @@ query_duckdb = f"""
                 ELSE '-'
             END AS aging_group,
 
-            -- wus_aging_group (Untuk Success = Last_Inbound ke TGL_UPDATE_POD; Undel = TGL_UPDATE_POD ke Hari Ini; UnHRS = TGL_UPDATE_POD ke Hari Ini)
             CASE 
                 WHEN w.Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND w.valid_inbound_date IS NOT NULL AND w.dt_update_pod IS NOT NULL THEN
                     CASE 
@@ -450,7 +447,6 @@ query_duckdb = f"""
                 ELSE '-'
             END AS wus_aging_group,
 
-            -- hrs_aging_group KHUSUS CARD METRIC: Murni dihitung dari TGL_UPDATE_STATUS_POD ke WUS_DATE
             CASE 
                 WHEN w.dt_update_pod IS NOT NULL AND w.dt_wus IS NOT NULL THEN
                     CASE 
