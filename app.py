@@ -617,7 +617,7 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC
+  # TAB 2: SUMMARY EXEC (TERHUBUNG KE FILTER MINGGU)
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
@@ -676,7 +676,7 @@ try:
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_curr_tgt,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_c_prev_tot,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_prev_tgt
-                FROM v_inbound {where_sql}
+                FROM v_inbound {where_sql} AND pod_week_num = {selected_week}
             """)
 
     if not kpi_batch_df.empty:
@@ -852,6 +852,7 @@ try:
         hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
         hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
 
+      # TERHUBUNG DENGAN FILTER MINGGU (pod_week_num)
       df_running_hrs = run_query(f"""
                     WITH base AS (
                         SELECT 
@@ -867,6 +868,7 @@ try:
                             COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7') THEN AWB END) as h7,
                             COUNT(DISTINCT CASE WHEN hrs_aging_group IS NOT NULL AND hrs_aging_group != '-' THEN AWB END) as h_gt
                         FROM v_inbound {where_sql}
+                        AND pod_week_num = {selected_week}
                         AND {hrs_status_sql}
                         AND {hrs_zona_sql}
                         GROUP BY LAST_LOCATION
@@ -1196,10 +1198,11 @@ try:
           mime="text/csv",
       )
 
+    # TERHUBUNG DENGAN FILTER MINGGU (pod_week_num) UNTUK 3 TABEL MATRIX BAWAH
     df_unrun = run_query(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM v_inbound
-                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                {where_sql} AND pod_week_num = {selected_week} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
             """)
     render_plotly_table_matrix(
@@ -1214,7 +1217,7 @@ try:
     df_succ = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
-                {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                {where_sql} AND pod_week_num = {selected_week} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
             """)
@@ -1230,7 +1233,7 @@ try:
     df_undel = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
-                {where_sql} AND Status_Shipment = 'UNDELIVERY'
+                {where_sql} AND pod_week_num = {selected_week} AND Status_Shipment = 'UNDELIVERY'
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
             """)
