@@ -700,7 +700,7 @@ try:
           status_filter_sql,
           unhrs_filter_sql,
           zona_filter_sql,
-          target_aging_code,
+          target_aging_condition_sql,
       ):
         # 1. Menghitung Total Angka Utama Card (Seluruh UnHRS All Aging)
         tot_all_df = conn.execute(f"""
@@ -731,11 +731,11 @@ try:
         )
         prev_week = current_week - 1 if current_week > 0 else 0
 
-        # 3. Menghitung Persentase Minggu Ini: Total yang SUDAH WUS di target_aging_code vs Total Seluruh Kiriman di Minggu Ini
+        # 3. Menghitung Persentase Minggu Ini dengan Akumulasi Target Aging (Zona A&B: <=H+0, Zona C: <=H+1)
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
-                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = '{target_aging_code}' THEN AWB END) as total_hrs_target
+                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND ({target_aging_condition_sql}) THEN AWB END) as total_hrs_target
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
@@ -750,7 +750,7 @@ try:
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
-                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = '{target_aging_code}' THEN AWB END) as total_hrs_target
+                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND ({target_aging_condition_sql}) THEN AWB END) as total_hrs_target
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
@@ -764,14 +764,14 @@ try:
         wow_diff = curr_pct - prev_pct
         return tot_all_value, curr_pct, wow_diff, current_week, prev_week
 
-      # Perhitungan untuk masing-masing dari 4 Card KPI
+      # Akumulasi Aging Target: Zona A&B target H+0 (hrs_aging_group = 'H+0'), Zona C target H+1 (hrs_aging_group IN ('H+0', 'H+1'))
       succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
           status_filter_sql=(
               "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
           ),
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
-          target_aging_code="H+0",
+          target_aging_condition_sql="hrs_aging_group = 'H+0'",
       )
 
       succ_c_vol, succ_c_pct, succ_c_wow, _, _ = get_kpi_metrics(
@@ -780,21 +780,21 @@ try:
           ),
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
-          target_aging_code="H+1",
+          target_aging_condition_sql="hrs_aging_group IN ('H+0', 'H+1')",
       )
 
       undel_ab_vol, undel_ab_pct, undel_ab_wow, _, _ = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY'",
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
-          target_aging_code="H+0",
+          target_aging_condition_sql="hrs_aging_group = 'H+0'",
       )
 
       undel_c_vol, undel_c_pct, undel_c_wow, _, _ = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY'",
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
-          target_aging_code="H+1",
+          target_aging_condition_sql="hrs_aging_group IN ('H+0', 'H+1')",
       )
 
       st.caption(
@@ -802,32 +802,46 @@ try:
           f" {prv_w}**"
       )
 
+      # Fungsi bantu untuk label metric dengan Logo Alert jika capaian di bawah 90% dari target 100%
+      def format_metric_label(base_label, pct_val):
+        return f"🚨 {base_label} (Jauh dari Target)" if pct_val < 90.0 else base_label
+
       k1, k2, k3, k4 = st.columns(4)
       with k1:
         st.metric(
-            label="🎯 Success UnHRS (Zona A&B | H+0)",
+            label=format_metric_label(
+                "🎯 Success UnHRS (Zona A&B | H+0)", succ_ab_pct
+            ),
             value=f"{succ_ab_vol:,} AWB",
             delta=f"{succ_ab_pct:.1f}% ({succ_ab_wow:+.1f}% WoW)",
+            delta_color="normal" if succ_ab_wow >= 0 else "inverse",
         )
       with k2:
         st.metric(
-            label="🎯 Success UnHRS (Zona C | H+1)",
+            label=format_metric_label(
+                "🎯 Success UnHRS (Zona C | $\le$ H+1)", succ_c_pct
+            ),
             value=f"{succ_c_vol:,} AWB",
             delta=f"{succ_c_pct:.1f}% ({succ_c_wow:+.1f}% WoW)",
+            delta_color="normal" if succ_c_wow >= 0 else "inverse",
         )
       with k3:
         st.metric(
-            label="⚠️ Undel UnHRS (Zona A&B | H+0)",
+            label=format_metric_label(
+                "⚠️ Undel UnHRS (Zona A&B | H+0)", undel_ab_pct
+            ),
             value=f"{undel_ab_vol:,} AWB",
             delta=f"{undel_ab_pct:.1f}% ({undel_ab_wow:+.1f}% WoW)",
-            delta_color="inverse",
+            delta_color="normal" if undel_ab_wow >= 0 else "inverse",
         )
       with k4:
         st.metric(
-            label="⚠️ Undel UnHRS (Zona C | H+1)",
+            label=format_metric_label(
+                "⚠️ Undel UnHRS (Zona C | $\le$ H+1)", undel_c_pct
+            ),
             value=f"{undel_c_vol:,} AWB",
             delta=f"{undel_c_pct:.1f}% ({undel_c_wow:+.1f}% WoW)",
-            delta_color="inverse",
+            delta_color="normal" if undel_c_wow >= 0 else "inverse",
         )
 
       st.markdown("---")
