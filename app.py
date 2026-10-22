@@ -729,7 +729,7 @@ try:
         tgt_all = all_df["target_awb"][0] or 0
         pct_all = (tgt_all / tot_all * 100.0) if tot_all > 0 else 0.0
 
-        # 2. Minggu Ini (7 Hari Terakhir)
+        # 2. Minggu Ini (7 Hari Terakhir) - Menggunakan acuan WUS_DATE untuk data yang sudah terproses/HRS
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -737,14 +737,14 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) >= CURRENT_DATE - INTERVAL 7 DAY
+                    AND CAST(WUS_DATE AS DATE) >= CURRENT_DATE - INTERVAL 7 DAY
                 """).fetchdf()
 
         curr_tot = curr_df["total_kiriman"][0] or 0
         curr_tgt = curr_df["total_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        # 3. Minggu Lalu (14 s/d 7 Hari Lalu)
+        # 3. Minggu Lalu (14 s/d 7 Hari Lalu) - Menggunakan acuan WUS_DATE
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -752,8 +752,8 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) >= CURRENT_DATE - INTERVAL 14 DAY
-                    AND CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) < CURRENT_DATE - INTERVAL 7 DAY
+                    AND CAST(WUS_DATE AS DATE) >= CURRENT_DATE - INTERVAL 14 DAY
+                    AND CAST(WUS_DATE AS DATE) < CURRENT_DATE - INTERVAL 7 DAY
                 """).fetchdf()
 
         prev_tot = prev_df["total_kiriman"][0] or 0
