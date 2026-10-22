@@ -969,166 +969,173 @@ try:
 
       st.markdown("---")
 
-      def render_plotly_table_matrix(df_raw, csv_filename, download_label):
-        if df_raw.empty:
-          st.info("Tidak ada data.")
-          return
+      def render_plotly_table_matrix(
+    df_raw, title_text, csv_filename, download_label
+):
+  if df_raw.empty:
+    st.info("Tidak ada data.")
+    return
 
-        pivot = df_raw.pivot(
-            index="Cabang", columns="aging_group", values="total_awb"
-        ).fillna(0)
-        for col in AGING_ORDER:
-          if col not in pivot.columns:
-            pivot[col] = 0
+  pivot = df_raw.pivot(
+      index="Cabang", columns="aging_group", values="total_awb"
+  ).fillna(0)
+  for col in AGING_ORDER:
+    if col not in pivot.columns:
+      pivot[col] = 0
 
-        pivot = pivot[AGING_ORDER]
-        pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
-        pivot = pivot.sort_values(by="Grand Total", ascending=False)
+  pivot = pivot[AGING_ORDER]
+  pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
+  pivot = pivot.sort_values(by="Grand Total", ascending=False)
 
-        grand_total_row = pivot.sum(axis=0)
-        grand_total_row.name = "Grand Total"
+  grand_total_row = pivot.sum(axis=0)
+  grand_total_row.name = "Grand Total"
 
-        pivot_with_total = pd.concat([pivot, pd.DataFrame([grand_total_row])])
-        pivot_with_total = pivot_with_total.reset_index().rename(
-            columns={"index": "Cabang"}
-        )
+  pivot_with_total = pd.concat([pivot, pd.DataFrame([grand_total_row])])
+  pivot_with_total = pivot_with_total.reset_index().rename(
+      columns={"index": "Cabang"}
+  )
 
-        headers = list(pivot_with_total.columns)
-        cell_values = []
-        for col in headers:
-          if col == "Cabang":
-            cell_values.append(pivot_with_total[col].astype(str).tolist())
-          else:
-            cell_values.append([
-                f"{int(val):,}" for val in pivot_with_total[col].tolist()
-            ])
+  headers = list(pivot_with_total.columns)
+  cell_values = []
+  for col in headers:
+    if col == "Cabang":
+      cell_values.append(pivot_with_total[col].astype(str).tolist())
+    else:
+      cell_values.append(
+          [f"{int(val):,}" for val in pivot_with_total[col].tolist()]
+      )
 
-        cell_colors = []
-        n_rows = len(pivot_with_total)
+  cell_colors = []
+  n_rows = len(pivot_with_total)
 
-        for col in headers:
-          col_color_list = []
-          for row_idx in range(n_rows):
-            if row_idx == n_rows - 1:
-              col_color_list.append("#222222")
-            elif col == "Cabang" or col == "Grand Total":
-              col_color_list.append("#2a2a2a")
-            else:
-              val = pivot_with_total[col].iloc[row_idx]
-              if col == "H+0":
-                col_color_list.append("#28a745" if val > 0 else "#1e1e1e")
-              elif col in ["H+1", "H+2"]:
-                col_color_list.append("#ffc107" if val > 0 else "#1e1e1e")
-              elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
-                col_color_list.append("#dc3545" if val > 0 else "#1e1e1e")
-              else:
-                col_color_list.append("#1e1e1e")
-          cell_colors.append(col_color_list)
+  for col in headers:
+    col_color_list = []
+    for row_idx in range(n_rows):
+      if row_idx == n_rows - 1:
+        col_color_list.append("#222222")
+      elif col == "Cabang" or col == "Grand Total":
+        col_color_list.append("#2a2a2a")
+      else:
+        val = pivot_with_total[col].iloc[row_idx]
+        if col == "H+0":
+          col_color_list.append("#28a745" if val > 0 else "#1e1e1e")
+        elif col in ["H+1", "H+2"]:
+          col_color_list.append("#ffc107" if val > 0 else "#1e1e1e")
+        elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
+          col_color_list.append("#dc3545" if val > 0 else "#1e1e1e")
+        else:
+          col_color_list.append("#1e1e1e")
+    cell_colors.append(col_color_list)
 
-        font_colors = []
-        for col in headers:
-          col_font_list = []
-          for row_idx in range(n_rows):
-            if row_idx == n_rows - 1:
-              col_font_list.append("#ffffff")
-            elif col in ["H+1", "H+2"]:
-              val = pivot_with_total[col].iloc[row_idx]
-              col_font_list.append("#000000" if val > 0 else "#ffffff")
-            else:
-              col_font_list.append("#ffffff")
-          font_colors.append(col_font_list)
+  font_colors = []
+  for col in headers:
+    col_font_list = []
+    for row_idx in range(n_rows):
+      if row_idx == n_rows - 1:
+        col_font_list.append("#ffffff")
+      elif col in ["H+1", "H+2"]:
+        val = pivot_with_total[col].iloc[row_idx]
+        col_font_list.append("#000000" if val > 0 else "#ffffff")
+      else:
+        col_font_list.append("#ffffff")
+    font_colors.append(col_font_list)
 
-        fig_table = go.Figure(
-            data=[
-                go.Table(
-                    header=dict(
-                        values=[f"<b>{h}</b>" for h in headers],
-                        fill_color="#333333",
-                        align="center",
-                        font=dict(color="white", size=13),
-                        height=32,
-                    ),
-                    cells=dict(
-                        values=cell_values,
-                        fill_color=cell_colors,
-                        align=[
-                            "left" if h == "Cabang" else "center"
-                            for h in headers
-                        ],
-                        font=dict(color=font_colors, size=12),
-                        height=28,
-                    ),
-                )
-            ]
-        )
+  fig_table = go.Figure(
+      data=[
+          go.Table(
+              header=dict(
+                  values=[f"<b>{h}</b>" for h in headers],
+                  fill_color="#333333",
+                  align="center",
+                  font=dict(color="white", size=13),
+                  height=32,
+              ),
+              cells=dict(
+                  values=cell_values,
+                  fill_color=cell_colors,
+                  align=["left" if h == "Cabang" else "center" for h in headers],
+                  font=dict(color=font_colors, size=12),
+                  height=28,
+              ),
+          )
+      ]
+  )
 
-        fig_table.update_layout(
-            margin=dict(l=10, r=10, t=10, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=280,
-        )
+  # Menambahkan Title ke dalam Plotly Layout agar ter-capture
+  fig_table.update_layout(
+      title=dict(
+          text=f"<b>{title_text}</b>",
+          x=0,
+          xanchor="left",
+          font=dict(size=16, color="#FFFFFF"),
+      ),
+      margin=dict(l=10, r=10, t=50, b=10),
+      paper_bgcolor="rgba(0,0,0,0)",
+      plot_bgcolor="rgba(0,0,0,0)",
+      height=320,
+  )
 
-        st.plotly_chart(fig_table, use_container_width=True)
+  st.plotly_chart(fig_table, use_container_width=True)
 
-        csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label=download_label,
-            data=csv_data,
-            file_name=csv_filename,
-            mime="text/csv",
-        )
+  csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
+  st.download_button(
+      label=download_label,
+      data=csv_data,
+      file_name=csv_filename,
+      mime="text/csv",
+  )
 
       st.subheader(
-          "📊 2. UnRunsheet Per Cabang (Aging Last_Inbound)"
-      )
-      df_unrun = conn.execute(f"""
-                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
-                FROM v_inbound
-                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
-                GROUP BY Cabang, aging_group
-            """).fetchdf()
-      render_plotly_table_matrix(
-          df_unrun,
-          "Matrix_UnRunsheet_Cabang.csv",
-          "📥 Download Data Matrix UnRunsheet (CSV)",
-      )
+         # --- Matrix 2 ---
+df_unrun = conn.execute(f"""
+    SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
+    FROM v_inbound
+    {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+    GROUP BY Cabang, aging_group
+""").fetchdf()
 
-      st.markdown("---")
+render_plotly_table_matrix(
+    df_unrun,
+    "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)",
+    "Matrix_UnRunsheet_Cabang.csv",
+    "📥 Download Data Matrix UnRunsheet (CSV)",
+)
 
-      st.subheader(
-          "📊 3. Success UnHRS Per Cabang"
-      )
-      df_succ = conn.execute(f"""
-                SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
-                FROM v_inbound
-                {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                GROUP BY Cabang, wus_aging_group
-            """).fetchdf()
-      render_plotly_table_matrix(
-          df_succ,
-          "Matrix_Success_WUS_Cabang.csv",
-          "📥 Download Data Matrix Success WUS (CSV)",
-      )
+st.markdown("---")
 
-      st.markdown("---")
+# --- Matrix 3 ---
+df_succ = conn.execute(f"""
+    SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
+    FROM v_inbound
+    {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+    GROUP BY Cabang, wus_aging_group
+""").fetchdf()
 
-      st.subheader(
-          "📊 4. Undel UnHRS Per Cabang"
-      )
-      df_undel = conn.execute(f"""
-                SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
-                FROM v_inbound
-                {where_sql} AND Status_Shipment = 'UNDELIVERY'
-                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                GROUP BY Cabang, wus_aging_group
-            """).fetchdf()
-      render_plotly_table_matrix(
-          df_undel,
-          "Matrix_Undel_WUS_Cabang.csv",
-          "📥 Download Data Matrix Undel WUS (CSV)",
-      )
+render_plotly_table_matrix(
+    df_succ,
+    "📊 3. Success UnHRS Per Cabang",
+    "Matrix_Success_WUS_Cabang.csv",
+    "📥 Download Data Matrix Success WUS (CSV)",
+)
+
+st.markdown("---")
+
+# --- Matrix 4 ---
+df_undel = conn.execute(f"""
+    SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
+    FROM v_inbound
+    {where_sql} AND Status_Shipment = 'UNDELIVERY'
+      AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+    GROUP BY Cabang, wus_aging_group
+""").fetchdf()
+
+render_plotly_table_matrix(
+    df_undel,
+    "📊 4. Undel UnHRS Per Cabang",
+    "Matrix_Undel_WUS_Cabang.csv",
+    "📥 Download Data Matrix Undel WUS (CSV)",
+)
 
     else:
       st.warning(
