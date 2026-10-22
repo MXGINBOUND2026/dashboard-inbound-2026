@@ -359,7 +359,6 @@ query_duckdb = f"""
             COALESCE(w.TGL_RECEIVED, '-') AS TGL_RECEIVED,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
             
-            -- Format tanggal menjadi MM/DD/YYYY HH:MM
             COALESCE(STRFTIME(w.valid_inbound_date, '%m/%d/%Y %H:%M'), '-') AS Last_Inbound,
             COALESCE(STRFTIME(w.dt_update_pod, '%m/%d/%Y %H:%M'), '-') AS TGL_UPDATE_STATUS_POD,
             COALESCE(STRFTIME(w.dt_wus, '%m/%d/%Y %H:%M'), '-') AS WUS_DATE,
@@ -381,51 +380,78 @@ query_duckdb = f"""
             w.Status_Shipment AS Status_Shipment,
             w.HRS AS HRS,
             
-            -- AGING 1: Dari TGL_UPDATE_STATUS_POD ke WUS_DATE (Khusus proses WUS: HRS, HOC, HRI)
+            -- Aging UnRunsheet / Inbound (Last_Inbound ke Hari Ini)
             CASE 
-                WHEN w.HRS IN ('HRS', 'HOC', 'HRI') AND w.dt_update_pod IS NOT NULL AND w.dt_wus IS NOT NULL THEN 
-                    DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE))
+                WHEN w.valid_inbound_date IS NOT NULL THEN 
+                    DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE)
+                WHEN w.valid_uninbound_date IS NOT NULL THEN
+                    DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE)
                 ELSE NULL
-            END AS aging_wus_days,
-
-            -- AGING 2: Dari TGL_UPDATE_STATUS_POD ke Hari Ini (Untuk yang belum WUS / UnHRS)
-            CASE 
-                WHEN (w.HRS NOT IN ('HRS', 'HOC', 'HRI') OR w.HRS IS NULL) AND w.dt_update_pod IS NOT NULL THEN 
-                    DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE)
-                ELSE NULL
-            END AS aging_today_days,
+            END AS age_days,
             
             COALESCE(w.POD_Category, '-') AS POD_Category,
             COALESCE(w.POD_DESC, '-') AS POD_DESC,
             
-            -- Aging Group Gabungan untuk Grafik / Filter
+            -- aging_group (Kembali ke Last_Inbound ke Hari Ini)
             CASE 
-                WHEN w.HRS IN ('HRS', 'HOC', 'HRI') AND w.dt_update_pod IS NOT NULL AND w.dt_wus IS NOT NULL THEN
+                WHEN w.valid_inbound_date IS NOT NULL THEN
                     CASE 
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 7 THEN 'H+7'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
-                WHEN w.dt_update_pod IS NOT NULL THEN
+                WHEN w.valid_uninbound_date IS NOT NULL THEN
                     CASE 
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(w.valid_uninbound_date AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
                 ELSE '-'
             END AS aging_group,
+
+            -- wus_aging_group (Khusus WUS & UnHRS: TGL_UPDATE_STATUS_POD ke WUS_DATE, atau ke Hari Ini jika UnHRS)
+            CASE 
+                WHEN w.dt_update_pod IS NOT NULL THEN
+                    CASE 
+                        WHEN w.dt_wus IS NOT NULL AND w.HRS IN ('HRS', 'HOC', 'HRI') THEN
+                            CASE 
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) <= 0 THEN 'H+0'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 1 THEN 'H+1'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 2 THEN 'H+2'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 3 THEN 'H+3'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 4 THEN 'H+4'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 5 THEN 'H+5'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 6 THEN 'H+6'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 7 THEN 'H+7'
+                                ELSE '>H+7'
+                            END
+                        ELSE
+                            CASE 
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 1 THEN 'H+1'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 2 THEN 'H+2'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
+                                WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
+                                ELSE '>H+7'
+                            END
+                    END
+                ELSE '-'
+            END AS wus_aging_group,
             w.TGL_TARIK_REPORT
         FROM processed w
         LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
