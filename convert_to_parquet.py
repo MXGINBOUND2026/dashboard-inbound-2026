@@ -421,9 +421,8 @@ query_duckdb = f"""
                 ELSE '-'
             END AS aging_group,
 
-            -- wus_aging_group (Sesuai Permintaan Spesifik Baru: Success = Last_Inbound ke TGL_UPDATE_POD; Undel = TGL_UPDATE_POD ke Hari Ini; UnHRS = TGL_UPDATE_POD ke Hari Ini)
+            -- wus_aging_group (Untuk Success = Last_Inbound ke TGL_UPDATE_POD; Undel = TGL_UPDATE_POD ke Hari Ini; UnHRS = TGL_UPDATE_POD ke Hari Ini)
             CASE 
-                -- 1. SUCCESS DELIVERY / SUCCESS RETURN SHIPPER: Last_Inbound ke TGL_UPDATE_STATUS_POD
                 WHEN w.Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND w.valid_inbound_date IS NOT NULL AND w.dt_update_pod IS NOT NULL THEN
                     CASE 
                         WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CAST(w.dt_update_pod AS DATE)) <= 0 THEN 'H+0'
@@ -436,22 +435,6 @@ query_duckdb = f"""
                         WHEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CAST(w.dt_update_pod AS DATE)) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
-                
-                -- 2. UNDELIVERY: TGL_UPDATE_STATUS_POD ke Hari Ini
-                WHEN w.Status_Shipment = 'UNDELIVERY' AND w.dt_update_pod IS NOT NULL THEN
-                    CASE 
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END
-
-                -- 3. UnHRS / Lainnya: TGL_UPDATE_STATUS_POD ke Hari Ini
                 WHEN w.dt_update_pod IS NOT NULL THEN
                     CASE 
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
@@ -466,6 +449,24 @@ query_duckdb = f"""
                     END
                 ELSE '-'
             END AS wus_aging_group,
+
+            -- hrs_aging_group KHUSUS CARD METRIC: Murni dihitung dari TGL_UPDATE_STATUS_POD ke WUS_DATE
+            CASE 
+                WHEN w.dt_update_pod IS NOT NULL AND w.dt_wus IS NOT NULL THEN
+                    CASE 
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) <= 0 THEN 'H+0'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 1 THEN 'H+1'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 7 THEN 'H+7'
+                        ELSE '>H+7'
+                    END
+                ELSE '-'
+            END AS hrs_aging_group,
+
             w.TGL_TARIK_REPORT
         FROM processed w
         LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
