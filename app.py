@@ -1242,10 +1242,11 @@ try:
             mime="text/csv",
         )
 
+      # FIX: UnRunsheet tidak menggunakan filter pod_week_num karena belum ada Runsheet/POD (pod_week_num is NULL)
       df_unrun = run_query(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM v_inbound
-                {where_sql} {week_clause} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
             """)
       render_plotly_table_matrix(
