@@ -15,6 +15,61 @@ st.set_page_config(
 )
 st.title("🚚 Database Inbound 2026")
 
+# =========================================================
+# CSS STYLING (ANIMASI RUNNING TEXT DENGAN PURE CSS)
+# =========================================================
+st.markdown(
+    """
+    <style>
+    @keyframes marquee {
+        0% { transform: translateX(100%); }
+        100% { transform: translateX(-100%); }
+    }
+    .marquee-container-tab1 {
+        width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        background-color: #f0f2f6;
+        padding: 8px 0;
+        border-radius: 5px;
+        box-sizing: border-box;
+        margin-bottom: 15px;
+    }
+    .marquee-text-tab1 {
+        display: inline-block;
+        padding-left: 100%;
+        animation: marquee 35s linear infinite;
+        color: #1f77b4;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    .marquee-container-tab2 {
+        width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        background-color: #e8f4f8;
+        padding: 10px 0;
+        border-radius: 5px;
+        box-sizing: border-box;
+        margin: 15px 0;
+    }
+    .marquee-text-tab2 {
+        display: inline-block;
+        padding-left: 100%;
+        animation: marquee 35s linear infinite;
+        color: #2c3e50;
+        font-weight: 600;
+        font-size: 15px;
+    }
+    .marquee-container-tab1:hover .marquee-text-tab1,
+    .marquee-container-tab2:hover .marquee-text-tab2 {
+        animation-play-state: paused;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
 TARGET_GDRIVE_FOLDER_ID = "1qLpozZT-UX2Wm_6F6FzCIjESUkEgbMaP"
 OUTPUT_PARQUET_NAME = "data_inbound_2026.parquet"
 LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
@@ -269,9 +324,11 @@ try:
 
     st.markdown(
         f"""
-        <marquee style="color: #1f77b4; background-color: #f0f2f6; padding: 8px; border-radius: 5px; font-weight: 600; font-size: 14px;">
-            🔄 Last Update At: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏆 Top 5 Kecamatan UnRunsheet: {top_kecamatan_str}
-        </marquee>
+        <div class="marquee-container-tab1">
+            <div class="marquee-text-tab1">
+                🔄 Last Update At: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏆 Top 5 Kecamatan UnRunsheet: {top_kecamatan_str}
+            </div>
+        </div>
     """,
         unsafe_allow_html=True,
     )
@@ -993,9 +1050,11 @@ try:
 
       st.markdown(
           f"""
-            <marquee style="color: #2c3e50; background-color: #e8f4f8; padding: 10px; border-radius: 5px; font-weight: 600; font-size: 15px;">
-                🔄 Last Update: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏢 <b>Total Inbound (Filtered):</b> {summary_str}
-            </marquee>
+            <div class="marquee-container-tab2">
+                <div class="marquee-text-tab2">
+                    🔄 Last Update: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏢 <b>Total Inbound (Filtered):</b> {summary_str}
+                </div>
+            </div>
         """,
           unsafe_allow_html=True,
       )
@@ -1242,7 +1301,6 @@ try:
             mime="text/csv",
         )
 
-      # FIX: UnRunsheet tidak menggunakan filter pod_week_num karena belum ada Runsheet/POD (pod_week_num is NULL)
       df_unrun = run_query(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM v_inbound
