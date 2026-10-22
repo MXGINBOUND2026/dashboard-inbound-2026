@@ -125,6 +125,11 @@ try:
       if "TGL_RECEIVED" in parquet_columns
       else "CAST(NULL AS VARCHAR) AS TGL_RECEIVED"
   )
+  hrs_aging_col_expr = (
+      "hrs_aging_group"
+      if "hrs_aging_group" in parquet_columns
+      else "CAST('-' AS VARCHAR) AS hrs_aging_group"
+  )
   coding_col_expr = (
       """
         CASE 
@@ -147,6 +152,7 @@ try:
             {courier_col_expr},
             {tgl_rec_col_expr},
             {coding_col_expr},
+            {hrs_aging_col_expr},
             CASE 
                 WHEN BILNOTE_AMOUNT IS NOT NULL AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '' AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '0' 
                 THEN 'COD' 
@@ -690,25 +696,31 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-      def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
-        all_df = conn.execute(f"""
+      def get_kpi_metrics(
+          status_filter_sql,
+          unhrs_filter_sql,
+          zona_filter_sql,
+          target_aging_code,
+      ):
+        # 1. Menghitung Total Angka Utama Card (Seluruh UnHRS All Aging)
+        tot_all_df = conn.execute(f"""
                     SELECT COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
+                    AND {unhrs_filter_sql}
                     AND {zona_filter_sql}
                 """).fetchdf()
 
-        tot_all = all_df["total_awb"][0] or 0
+        tot_all_value = tot_all_df["total_awb"][0] or 0
 
-        # Diperbaiki agar mendeteksi nomor minggu secara akurat dari data yang ada
+        # 2. Menentukan Minggu Berjalan & Minggu Sebelumnya dari Data Aktual POD Update
         week_info = conn.execute(f"""
-                    SELECT WEEK(TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M')) as wk_num
+                    SELECT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound) IS NOT NULL 
-                    AND COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound) != '-'
-                    ORDER BY TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M') DESC
+                    AND TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-'
+                    ORDER BY TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M') DESC
                     LIMIT 1
                 """).fetchdf()
 
@@ -719,57 +731,68 @@ try:
         )
         prev_week = current_week - 1 if current_week > 0 else 0
 
+        # 3. Menghitung Persentase Minggu Ini: Total yang SUDAH WUS di target_aging_code vs Total Seluruh Kiriman di Minggu Ini
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
-                        COUNT(DISTINCT CASE WHEN wus_aging_group = '{target_aging_code}' THEN AWB END) as total_target
+                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = '{target_aging_code}' THEN AWB END) as total_hrs_target
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M')) = {current_week}
+                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {current_week}
                 """).fetchdf()
 
         curr_tot = curr_df["total_kiriman"][0] or 0
-        curr_tgt = curr_df["total_target"][0] or 0
+        curr_tgt = curr_df["total_hrs_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
+        # 4. Menghitung Persentase Minggu Sebelumnya
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
-                        COUNT(DISTINCT CASE WHEN wus_aging_group = '{target_aging_code}' THEN AWB END) as total_target
+                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = '{target_aging_code}' THEN AWB END) as total_hrs_target
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M')) = {prev_week}
+                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {prev_week}
                 """).fetchdf()
 
         prev_tot = prev_df["total_kiriman"][0] or 0
-        prev_tgt = prev_df["total_target"][0] or 0
+        prev_tgt = prev_df["total_hrs_target"][0] or 0
         prev_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
 
         wow_diff = curr_pct - prev_pct
-        return tot_all, curr_pct, wow_diff, current_week, prev_week
+        return tot_all_value, curr_pct, wow_diff, current_week, prev_week
 
+      # Perhitungan untuk masing-masing dari 4 Card KPI
       succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
-          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          status_filter_sql=(
+              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
+          ),
+          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_code="H+0",
       )
 
       succ_c_vol, succ_c_pct, succ_c_wow, _, _ = get_kpi_metrics(
-          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          status_filter_sql=(
+              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
+          ),
+          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_code="H+1",
       )
 
       undel_ab_vol, undel_ab_pct, undel_ab_wow, _, _ = get_kpi_metrics(
-          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          status_filter_sql="Status_Shipment = 'UNDELIVERY'",
+          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_code="H+0",
       )
 
       undel_c_vol, undel_c_pct, undel_c_wow, _, _ = get_kpi_metrics(
-          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
+          status_filter_sql="Status_Shipment = 'UNDELIVERY'",
+          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_code="H+1",
       )
