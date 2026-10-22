@@ -99,7 +99,6 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.stop()
 
 try:
-  # Batasi memori DuckDB max 512MB
   conn = duckdb.connect()
   conn.execute("SET memory_limit='512MB';")
 
@@ -704,7 +703,6 @@ try:
           zona_filter_sql,
           target_aging_condition_sql,
       ):
-        # 1. Total UnHRS All Aging
         tot_all_df = conn.execute(f"""
                     SELECT COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
@@ -715,7 +713,6 @@ try:
 
         tot_all_value = tot_all_df["total_awb"][0] or 0
 
-        # 2. Penentuan Minggu Berjalan
         week_info = conn.execute(f"""
                     SELECT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
                     FROM v_inbound {where_sql}
@@ -733,7 +730,6 @@ try:
         )
         prev_week = current_week - 1 if current_week > 0 else 0
 
-        # 3. Persentase Minggu Ini
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -748,7 +744,6 @@ try:
         curr_tgt = curr_df["total_hrs_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        # 4. Persentase Minggu Sebelumnya
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -766,7 +761,6 @@ try:
         wow_diff = curr_pct - prev_pct
         return tot_all_value, curr_pct, wow_diff, current_week, prev_week
 
-      # Menghitung 4 Card Metrics
       succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
           status_filter_sql=(
               "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
@@ -864,9 +858,6 @@ try:
 
       st.markdown("---")
 
-      # =========================================================
-      # DETAIL CAPAIAN RUNNING TOTAL HRS (SANGAT RINGAN RAM)
-      # =========================================================
       if "selected_hrs_category" not in st.session_state:
         st.session_state.selected_hrs_category = None
 
@@ -927,6 +918,7 @@ try:
           hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
           hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
 
+        # Query Sangat Cepat Langsung Membaca Parquet
         df_running_hrs = conn.execute(f"""
                     WITH base AS (
                         SELECT 
@@ -973,8 +965,6 @@ try:
               "H+7",
               ">H+7",
           ]
-
-          # Menggunakan Streamlit Column Configuration (Tanpa Beban Pandas Styler CSS)
           column_config = {
               c: st.column_config.NumberColumn(
                   label=c, format="%.2f%%", min_value=0, max_value=100
