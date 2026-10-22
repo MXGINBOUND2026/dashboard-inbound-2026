@@ -1080,7 +1080,7 @@ try:
         )
 
       st.subheader(
-          "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)"
+          "📊 2. UnRunsheet Per Cabang (Aging Last_Inbound)"
       )
       df_unrun = conn.execute(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
@@ -1097,8 +1097,7 @@ try:
       st.markdown("---")
 
       st.subheader(
-          "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging WUS vs"
-          " TGL_UPDATE_STATUS_POD)"
+          "📊 3. Success UnHRS Per Cabang"
       )
       df_succ = conn.execute(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
@@ -1116,8 +1115,7 @@ try:
       st.markdown("---")
 
       st.subheader(
-          "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging WUS vs"
-          " TGL_UPDATE_STATUS_POD)"
+          "📊 4. Undel UnHRS Per Cabang"
       )
       df_undel = conn.execute(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
