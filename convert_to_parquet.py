@@ -440,7 +440,7 @@ query_duckdb = f"""
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 6 THEN 'H+6'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
@@ -452,12 +452,12 @@ query_duckdb = f"""
                     CASE 
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) <= 0 THEN 'H+0'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 7 THEN 'H+7'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 2 THEN 'H+2'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 3 THEN 'H+3'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 4 THEN 'H+4'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
                 ELSE '-'
