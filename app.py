@@ -1111,8 +1111,7 @@ try:
             """).fetchdf()
       render_plotly_table_matrix(
           df_succ,
-          "📊 3. Matrix Infografis Success UnHRS Per Cabang (Aging WUS vs"
-          " TGL_UPDATE_STATUS_POD)",
+          "📊 3. Success UnHRS Per Cabang",
           "Matrix_Success_WUS_Cabang.csv",
           "📥 Download Data Matrix Success WUS (CSV)",
       )
@@ -1128,8 +1127,7 @@ try:
             """).fetchdf()
       render_plotly_table_matrix(
           df_undel,
-          "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Aging WUS vs"
-          " TGL_UPDATE_STATUS_POD)",
+          "📊 4. Undel UnHRS Per Cabang",
           "Matrix_Undel_WUS_Cabang.csv",
           "📥 Download Data Matrix Undel WUS (CSV)",
       )
