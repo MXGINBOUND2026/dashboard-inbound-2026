@@ -700,11 +700,15 @@ try:
 
         tot_all = all_df["total_awb"][0] or 0
 
+        # Diperbaiki agar mendeteksi nomor minggu secara akurat dari data yang ada
         week_info = conn.execute(f"""
-                    SELECT WEEK(TRY_STRPTIME(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD), '%m/%d/%Y %H:%M')) as wk_num
+                    SELECT WEEK(TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M')) as wk_num
                     FROM v_inbound {where_sql}
-                    AND (WUS_DATE IS NOT NULL AND WUS_DATE != '-') OR (TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-')
-                    ORDER BY TRY_STRPTIME(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD), '%m/%d/%Y %H:%M') DESC
+                    AND {status_filter_sql}
+                    AND {zona_filter_sql}
+                    AND COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound) IS NOT NULL 
+                    AND COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound) != '-'
+                    ORDER BY TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M') DESC
                     LIMIT 1
                 """).fetchdf()
 
@@ -722,7 +726,7 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD), '%m/%d/%Y %H:%M')) = {current_week}
+                    AND WEEK(TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M')) = {current_week}
                 """).fetchdf()
 
         curr_tot = curr_df["total_kiriman"][0] or 0
@@ -736,7 +740,7 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD), '%m/%d/%Y %H:%M')) = {prev_week}
+                    AND WEEK(TRY_STRPTIME(COALESCE(TGL_UPDATE_STATUS_POD, Last_Inbound), '%m/%d/%Y %H:%M')) = {prev_week}
                 """).fetchdf()
 
         prev_tot = prev_df["total_kiriman"][0] or 0
