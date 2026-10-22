@@ -16,7 +16,7 @@ st.set_page_config(
 st.title("🚚 Database Inbound 2026")
 
 # =========================================================
-# CSS STYLING (ANIMASI RUNNING TEXT DENGAN PURE CSS)
+# CSS STYLING (ANIMASI RUNNING TEXT DENGAN PURE CSS & CARDS)
 # =========================================================
 st.markdown(
     """
@@ -394,8 +394,6 @@ try:
         st.session_state.active_card_filter = "UnRunsheet with PRA"
         st.rerun()
 
-    st.markdown("---")
-
     col_m1, col_m2 = st.columns(2)
     with col_m1:
       st.metric(label="⚠️ Success UnHRS", value=f"{total_success_unhrs:,}")
@@ -416,78 +414,81 @@ try:
         st.session_state.active_card_filter = "Undel UnHRS"
         st.rerun()
 
-    if st.session_state.active_card_filter:
-      if st.button(
-          f"🔄 Reset Filter Card [{st.session_state.active_card_filter}]"
-      ):
-        st.session_state.active_card_filter = None
-        st.rerun()
-
-    st.markdown("---")
-
+    # PERBAIKAN REKOMENDASI 1: PENYEMBUNYIAN TABEL DETAIL AWB DENGAN EXPANDER
     if st.session_state.active_card_filter:
       card_title = st.session_state.active_card_filter
-      st.subheader(
-          f"📋 Tabel Detail AWB — Berdasarkan Klik Card: [{card_title}]"
-      )
 
-      if card_title == "Success UnHRS":
-        card_query_filter = """
-                    Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
-                    AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
-                """
-        df_card_detail = run_query(f"""
-                    SELECT AWB, LAST_LOCATION AS Last_Location, TGL_UPDATE_STATUS_POD, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
-                    FROM v_inbound
-                    {where_sql} AND {card_query_filter}
-                    LIMIT 1000
-                """)
-      else:
-        if card_title == "Undel UnHRS":
+      with st.expander(
+          f"📋 Detail AWB — Berdasarkan Card Filter: [{card_title}] (Klik untuk"
+          " Buka/Tutup)",
+          expanded=True,
+      ):
+        if card_title == "Success UnHRS":
           card_query_filter = """
-                        Status_Shipment = 'UNDELIVERY' 
+                        Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
                         AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                     """
-        elif card_title == "Total UnRunsheet":
-          card_query_filter = (
-              "Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
-          )
-        elif card_title == "UnRunsheet with PRA":
-          card_query_filter = "Status_Shipment = 'UnRunsheet with PRA'"
-        elif card_title == "UnInbound":
-          card_query_filter = "Status_Shipment = 'UnInbound'"
+          df_card_detail = run_query(f"""
+                        SELECT AWB, LAST_LOCATION AS Last_Location, TGL_UPDATE_STATUS_POD, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
+                        FROM v_inbound
+                        {where_sql} AND {card_query_filter}
+                        LIMIT 1000
+                    """)
         else:
-          card_query_filter = "1=1"
+          if card_title == "Undel UnHRS":
+            card_query_filter = """
+                            Status_Shipment = 'UNDELIVERY' 
+                            AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                        """
+          elif card_title == "Total UnRunsheet":
+            card_query_filter = (
+                "Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
+            )
+          elif card_title == "UnRunsheet with PRA":
+            card_query_filter = "Status_Shipment = 'UnRunsheet with PRA'"
+          elif card_title == "UnInbound":
+            card_query_filter = "Status_Shipment = 'UnInbound'"
+          else:
+            card_query_filter = "1=1"
 
-        df_card_detail = run_query(f"""
-                    SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
-                    FROM v_inbound
-                    {where_sql} AND {card_query_filter}
-                    ORDER BY age_days DESC
-                    LIMIT 1000
-                """)
+          df_card_detail = run_query(f"""
+                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                        FROM v_inbound
+                        {where_sql} AND {card_query_filter}
+                        ORDER BY age_days DESC
+                        LIMIT 1000
+                    """)
 
-      if not df_card_detail.empty:
-        st.caption(
-            f"Total AWB Ditampilkan: **{len(df_card_detail):,}** (Maksimal 1.000"
-            " baris)"
-        )
-        st.dataframe(df_card_detail, use_container_width=True, height=400)
+        if not df_card_detail.empty:
+          st.caption(
+              f"Total AWB Ditampilkan: **{len(df_card_detail):,}** (Maksimal 1.000"
+              " baris)"
+          )
+          st.dataframe(df_card_detail, use_container_width=True, height=350)
 
-        csv_card = df_card_detail.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label=f"📥 Download Data Detail [{card_title}] (CSV)",
-            data=csv_card,
-            file_name=f"Detail_Card_{card_title.replace(' ', '_')}.csv",
-            mime="text/csv",
-        )
-      else:
-        st.info(
-            f"Tidak ada data AWB yang cocok untuk kategori [{card_title}]"
-            " dengan filter aktif."
-        )
+          c_dl, c_rst = st.columns([3, 1])
+          with c_dl:
+            csv_card = df_card_detail.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label=f"📥 Download Data Detail [{card_title}] (CSV)",
+                data=csv_card,
+                file_name=f"Detail_Card_{card_title.replace(' ', '_')}.csv",
+                mime="text/csv",
+            )
+          with c_rst:
+            if st.button(
+                f"🔄 Reset Filter Card [{card_title}]",
+                use_container_width=True,
+            ):
+              st.session_state.active_card_filter = None
+              st.rerun()
+        else:
+          st.info(
+              f"Tidak ada data AWB yang cocok untuk kategori [{card_title}]"
+              " dengan filter aktif."
+          )
 
-      st.markdown("---")
+    st.markdown("---")
 
     view_choice = st.radio(
         "📌 Pilih Tampilan Data Dashboard:",
@@ -579,74 +580,72 @@ try:
 
       st.markdown("---")
 
-      st.subheader(
-          "📊 Tabel Matrix Status Shipment (Filter Aging:"
-          f" [{selected_aging_group}])"
-      )
+      # PERBAIKAN REKOMENDASI 2: EXPANDER UNTUK MATRIKS PENUNJANG
+      with st.expander(
+          f"📊 Tabel Matrix Status Shipment (Filter Aging:"
+          f" [{selected_aging_group}])",
+          expanded=False,
+      ):
+        pivot_matrix = run_query(f"""
+                    PIVOT (
+                        SELECT Status_Shipment, aging_group, AWB 
+                        FROM v_inbound {where_sql} {aging_clause}
+                    )
+                    ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                    USING COUNT(DISTINCT AWB)
+                    GROUP BY Status_Shipment
+                """)
 
-      pivot_matrix = run_query(f"""
-                PIVOT (
-                    SELECT Status_Shipment, aging_group, AWB 
-                    FROM v_inbound {where_sql} {aging_clause}
-                )
-                ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
-                USING COUNT(DISTINCT AWB)
-                GROUP BY Status_Shipment
-            """)
+        if not pivot_matrix.empty:
+          pivot_matrix = pivot_matrix.fillna(0)
+          numeric_cols = [
+              c for c in pivot_matrix.columns if c != "Status_Shipment"
+          ]
+          pivot_matrix["Grand Total"] = pivot_matrix[numeric_cols].sum(axis=1)
+          st.dataframe(pivot_matrix, use_container_width=True)
+        else:
+          st.info("Tidak ada data untuk kombinasi filter yang dipilih.")
 
-      if not pivot_matrix.empty:
-        pivot_matrix = pivot_matrix.fillna(0)
-        numeric_cols = [
-            c for c in pivot_matrix.columns if c != "Status_Shipment"
-        ]
-        pivot_matrix["Grand Total"] = pivot_matrix[numeric_cols].sum(axis=1)
-        st.dataframe(pivot_matrix, use_container_width=True)
-      else:
-        st.info("Tidak ada data untuk kombinasi filter yang dipilih.")
+      with st.expander(
+          f"🗂️ Unrunsheet By Last Location (Filter Aging:"
+          f" [{selected_aging_group}])",
+          expanded=False,
+      ):
+        pivot_loc = run_query(f"""
+                    PIVOT (
+                        SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
+                        FROM v_inbound
+                        {where_sql} {unrunsheet_status_clause} {aging_clause}
+                    )
+                    ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                    USING COUNT(DISTINCT AWB)
+                    GROUP BY LAST_LOCATION, Cabang, Zona, Kecamatan
+                """)
 
-      st.markdown("---")
+        if not pivot_loc.empty:
+          pivot_loc = pivot_loc.fillna(0)
+          num_cols = [
+              c
+              for c in pivot_loc.columns
+              if c not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
+          ]
+          pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
+          st.dataframe(pivot_loc, use_container_width=True)
+        else:
+          st.info("Tidak ada data Unrunsheet.")
 
-      st.subheader(
-          "🗂️ Unrunsheet By Last Location (Filter Aging:"
-          f" [{selected_aging_group}])"
-      )
-
-      pivot_loc = run_query(f"""
-                PIVOT (
-                    SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
+      with st.expander(
+          f"📋 Detail AWB — Kategori Aging: [{selected_aging_group}]",
+          expanded=False,
+      ):
+        df_detail = run_query(f"""
+                    SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                     FROM v_inbound
                     {where_sql} {unrunsheet_status_clause} {aging_clause}
-                )
-                ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
-                USING COUNT(DISTINCT AWB)
-                GROUP BY LAST_LOCATION, Cabang, Zona, Kecamatan
-            """)
-
-      if not pivot_loc.empty:
-        pivot_loc = pivot_loc.fillna(0)
-        num_cols = [
-            c
-            for c in pivot_loc.columns
-            if c not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
-        ]
-        pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
-        st.dataframe(pivot_loc, use_container_width=True)
-      else:
-        st.info("Tidak ada data Unrunsheet.")
-
-      st.subheader(
-          f"📋 Detail AWB — Kategori Aging: [{selected_aging_group}]"
-      )
-
-      df_detail = run_query(f"""
-                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
-                FROM v_inbound
-                {where_sql} {unrunsheet_status_clause} {aging_clause}
-                ORDER BY age_days DESC
-                LIMIT 1000
-            """)
-
-      st.dataframe(df_detail, use_container_width=True)
+                    ORDER BY age_days DESC
+                    LIMIT 1000
+                """)
+        st.dataframe(df_detail, use_container_width=True)
 
     else:
       st.subheader(
