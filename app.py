@@ -468,10 +468,10 @@ try:
           card_query_filter = "1=1"
 
         df_card_detail = conn.execute(f"""
-                    SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, aging_today_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                    SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                     FROM v_inbound
                     {where_sql} AND {card_query_filter}
-                    ORDER BY aging_today_days DESC
+                    ORDER BY age_days DESC
                     LIMIT 1000
                 """).fetchdf()
 
@@ -647,10 +647,10 @@ try:
       )
 
       df_detail = conn.execute(f"""
-                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, aging_today_days AS "Aging Today (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                 FROM v_inbound
                 {where_sql} {unrunsheet_status_clause} {aging_clause}
-                ORDER BY aging_today_days DESC
+                ORDER BY age_days DESC
                 LIMIT 1000
             """).fetchdf()
 
@@ -661,10 +661,10 @@ try:
           "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
       )
       df_uninbound_show = conn.execute(f"""
-                SELECT AWB, Cabang, Zona, Kecamatan, payment_type, aging_today_days AS "Aging Last Inbound (Hari)", SERVICE, Status_Shipment, HRS
+                SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging Last Inbound (Hari)", SERVICE, Status_Shipment, HRS
                 FROM v_inbound
                 {where_sql} AND Status_Shipment = 'UnInbound'
-                ORDER BY aging_today_days DESC
+                ORDER BY age_days DESC
                 LIMIT 1000
             """).fetchdf()
 
@@ -703,8 +703,8 @@ try:
         week_info = conn.execute(f"""
                     SELECT WEEK(TRY_STRPTIME(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD), '%m/%d/%Y %H:%M')) as wk_num
                     FROM v_inbound {where_sql}
-                    AND WUS_DATE IS NOT NULL AND WUS_DATE != '-'
-                    ORDER BY TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %H:%M') DESC
+                    AND (WUS_DATE IS NOT NULL AND WUS_DATE != '-') OR (TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-')
+                    ORDER BY TRY_STRPTIME(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD), '%m/%d/%Y %H:%M') DESC
                     LIMIT 1
                 """).fetchdf()
 
@@ -747,25 +747,25 @@ try:
         return tot_all, curr_pct, wow_diff, current_week, prev_week
 
       succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
-          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND HRS IN ('HRS', 'HOC', 'HRI')",
+          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_code="H+0",
       )
 
       succ_c_vol, succ_c_pct, succ_c_wow, _, _ = get_kpi_metrics(
-          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND HRS IN ('HRS', 'HOC', 'HRI')",
+          status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_code="H+1",
       )
 
       undel_ab_vol, undel_ab_pct, undel_ab_wow, _, _ = get_kpi_metrics(
-          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND HRS IN ('HRS', 'HOC', 'HRI')",
+          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_code="H+0",
       )
 
       undel_c_vol, undel_c_pct, undel_c_wow, _, _ = get_kpi_metrics(
-          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND HRS IN ('HRS', 'HOC', 'HRI')",
+          status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_code="H+1",
       )
@@ -778,26 +778,26 @@ try:
       k1, k2, k3, k4 = st.columns(4)
       with k1:
         st.metric(
-            label="🎯 Success WUS (Zona A&B | H+0)",
+            label="🎯 Success UnHRS (Zona A&B | H+0)",
             value=f"{succ_ab_vol:,} AWB",
             delta=f"{succ_ab_pct:.1f}% ({succ_ab_wow:+.1f}% WoW)",
         )
       with k2:
         st.metric(
-            label="🎯 Success WUS (Zona C | H+1)",
+            label="🎯 Success UnHRS (Zona C | H+1)",
             value=f"{succ_c_vol:,} AWB",
             delta=f"{succ_c_pct:.1f}% ({succ_c_wow:+.1f}% WoW)",
         )
       with k3:
         st.metric(
-            label="⚠️ Undel WUS (Zona A&B | H+0)",
+            label="⚠️ Undel UnHRS (Zona A&B | H+0)",
             value=f"{undel_ab_vol:,} AWB",
             delta=f"{undel_ab_pct:.1f}% ({undel_ab_wow:+.1f}% WoW)",
             delta_color="inverse",
         )
       with k4:
         st.metric(
-            label="⚠️ Undel WUS (Zona C | H+1)",
+            label="⚠️ Undel UnHRS (Zona C | H+1)",
             value=f"{undel_c_vol:,} AWB",
             delta=f"{undel_c_pct:.1f}% ({undel_c_wow:+.1f}% WoW)",
             delta_color="inverse",
@@ -1091,35 +1091,33 @@ try:
       st.markdown("---")
 
       df_succ = conn.execute(f"""
-                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
+                SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                  AND HRS IN ('HRS', 'HOC', 'HRI')
-                GROUP BY Cabang, aging_group
+                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                GROUP BY Cabang, wus_aging_group
             """).fetchdf()
       render_plotly_table_matrix(
           df_succ,
-          "📊 3. Matrix Infografis Success WUS Per Cabang (Aging TGL_UPDATE_POD"
-          " vs WUS_DATE)",
-          "Matrix_Success_WUS_Cabang.csv",
-          "📥 Download Data Matrix Success WUS (CSV)",
+          "📊 3. Matrix Infografis Success UnHRS Per Cabang",
+          "Matrix_Success_UnHRS_Cabang.csv",
+          "📥 Download Data Matrix Success UnHRS (CSV)",
       )
 
       st.markdown("---")
 
       df_undel = conn.execute(f"""
-                SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb
+                SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} AND Status_Shipment = 'UNDELIVERY'
-                  AND HRS IN ('HRS', 'HOC', 'HRI')
-                GROUP BY Cabang, aging_group
+                  AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                GROUP BY Cabang, wus_aging_group
             """).fetchdf()
       render_plotly_table_matrix(
           df_undel,
-          "📊 4. Matrix Infografis Undel WUS Per Cabang (Aging TGL_UPDATE_POD"
-          " vs WUS_DATE)",
-          "Matrix_Undel_WUS_Cabang.csv",
-          "📥 Download Data Matrix Undel WUS (CSV)",
+          "📊 4. Matrix Infografis Undel UnHRS Per Cabang",
+          "Matrix_Undel_UnHRS_Cabang.csv",
+          "📥 Download Data Matrix Undel UnHRS (CSV)",
       )
 
     else:
