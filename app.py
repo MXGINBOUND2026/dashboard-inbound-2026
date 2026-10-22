@@ -81,6 +81,7 @@ def sync_parquet_from_gdrive():
 st.sidebar.header("⚙️ Pengaturan & Sinkronisasi GDrive")
 if st.sidebar.button("🔄 Refresh & Tarik Data Terbaru"):
   st.cache_resource.clear()
+  st.cache_data.clear()
   if os.path.exists(LOCAL_PARQUET_PATH):
     os.remove(LOCAL_PARQUET_PATH)
   st.success("Cache dibersihkan! Mengunduh file terbaru...")
@@ -98,11 +99,16 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.error("File database tidak dapat diunduh. Silakan cek koneksi/GDrive.")
     st.stop()
 
-try:
-  conn = duckdb.connect()
-  conn.execute("SET memory_limit='512MB';")
 
-  parquet_columns = conn.execute(
+# =========================================================
+# CACHED QUERY FUNCTIONS (SOLusi Utama Anti-Lag / Throttling)
+# =========================================================
+@st.cache_data(ttl=1800)
+def run_query(sql_query):
+  con = duckdb.connect()
+  con.execute("SET memory_limit='512MB';")
+
+  parquet_columns = con.execute(
       f"DESCRIBE SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')"
   ).fetchdf()["column_name"].tolist()
 
@@ -144,7 +150,7 @@ try:
       else "CAST('-' AS VARCHAR) AS CODING"
   )
 
-  conn.execute(f"""
+  con.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
         SELECT 
             *,
@@ -162,6 +168,12 @@ try:
         FROM read_parquet('{LOCAL_PARQUET_PATH}')
     """)
 
+  df_res = con.execute(sql_query).fetchdf()
+  con.close()
+  return df_res
+
+
+try:
   tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
 
   # =========================================================
@@ -170,10 +182,10 @@ try:
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
 
-  min_max_date = conn.execute("""
+  min_max_date = run_query("""
         SELECT MIN(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) as min_d, MAX(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) as max_d 
         FROM v_inbound WHERE Last_Inbound IS NOT NULL AND Last_Inbound != '-'
-    """).fetchdf()
+    """)
 
   default_start = (
       min_max_date["min_d"][0].date()
@@ -199,12 +211,10 @@ try:
         max_value=default_end,
     )
 
-  unique_locations = [
-      r[0]
-      for r in conn.execute(
-          "SELECT DISTINCT LAST_LOCATION FROM v_inbound WHERE LAST_LOCATION IS NOT NULL ORDER BY 1"
-      ).fetchall()
-  ]
+  unique_locations = run_query(
+      "SELECT DISTINCT LAST_LOCATION FROM v_inbound WHERE LAST_LOCATION IS NOT"
+      " NULL ORDER BY 1"
+  )["LAST_LOCATION"].tolist()
 
   allowed_cabang_list = [
       "Malang",
@@ -215,12 +225,9 @@ try:
       "Turen",
       "Unknown",
   ]
-  unique_cabang_db = [
-      r[0]
-      for r in conn.execute(
-          "SELECT DISTINCT Cabang FROM v_inbound WHERE Cabang IS NOT NULL ORDER BY 1"
-      ).fetchall()
-  ]
+  unique_cabang_db = run_query(
+      "SELECT DISTINCT Cabang FROM v_inbound WHERE Cabang IS NOT NULL ORDER BY 1"
+  )["Cabang"].tolist()
   unique_cabang = [
       c
       for c in unique_cabang_db
@@ -229,30 +236,20 @@ try:
       )
   ]
 
-  unique_zona = [
-      r[0]
-      for r in conn.execute(
-          "SELECT DISTINCT Zona FROM v_inbound WHERE Zona IS NOT NULL ORDER BY 1"
-      ).fetchall()
-  ]
-  unique_kecamatan = [
-      r[0]
-      for r in conn.execute(
-          "SELECT DISTINCT Kecamatan FROM v_inbound WHERE Kecamatan IS NOT NULL ORDER BY 1"
-      ).fetchall()
-  ]
-  unique_status = [
-      r[0]
-      for r in conn.execute(
-          "SELECT DISTINCT Status_Shipment FROM v_inbound WHERE Status_Shipment IS NOT NULL ORDER BY 1"
-      ).fetchall()
-  ]
-  unique_hrs = [
-      r[0]
-      for r in conn.execute(
-          "SELECT DISTINCT HRS FROM v_inbound WHERE HRS IS NOT NULL ORDER BY 1"
-      ).fetchall()
-  ]
+  unique_zona = run_query(
+      "SELECT DISTINCT Zona FROM v_inbound WHERE Zona IS NOT NULL ORDER BY 1"
+  )["Zona"].tolist()
+  unique_kecamatan = run_query(
+      "SELECT DISTINCT Kecamatan FROM v_inbound WHERE Kecamatan IS NOT NULL"
+      " ORDER BY 1"
+  )["Kecamatan"].tolist()
+  unique_status = run_query(
+      "SELECT DISTINCT Status_Shipment FROM v_inbound WHERE Status_Shipment IS"
+      " NOT NULL ORDER BY 1"
+  )["Status_Shipment"].tolist()
+  unique_hrs = run_query(
+      "SELECT DISTINCT HRS FROM v_inbound WHERE HRS IS NOT NULL ORDER BY 1"
+  )["HRS"].tolist()
 
   chosen_loc = st.sidebar.multiselect(
       "🔍 Filter Last Location:", unique_locations
@@ -302,9 +299,9 @@ try:
   # =========================================================
   with tab1:
     try:
-      max_date_df = conn.execute("""
+      max_date_df = run_query("""
                 SELECT MAX(TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M')) as max_dt FROM v_inbound
-            """).fetchdf()
+            """)
       max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
       formatted_date = (
           pd.to_datetime(max_date).strftime("%d %b %Y %H:%M")
@@ -314,12 +311,12 @@ try:
     except Exception:
       formatted_date = "Format tanggal tidak dikenali"
 
-    top_kec_df = conn.execute(f"""
+    top_kec_df = run_query(f"""
             SELECT Kecamatan, COUNT(DISTINCT AWB) as total 
             FROM v_inbound {where_sql} 
             AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
             GROUP BY Kecamatan ORDER BY total DESC LIMIT 5
-        """).fetchdf()
+        """)
 
     top_kecamatan_str = " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join([
         f"{row.Kecamatan} ({row.total:,})" for idx, row in top_kec_df.iterrows()
@@ -341,14 +338,14 @@ try:
     if "active_card_filter" not in st.session_state:
       st.session_state.active_card_filter = None
 
-    metrics_res = conn.execute(f"""
+    metrics_res = run_query(f"""
             SELECT 
                 COUNT(DISTINCT AWB) AS total_awb,
                 COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnInbound' THEN AWB END) AS total_uninbound,
                 COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) AS total_unrunsheet,
                 COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra
             FROM v_inbound {where_sql}
-        """).fetchdf()
+        """)
 
     total_awb = metrics_res["total_awb"][0] or 0
     total_uninbound = metrics_res["total_uninbound"][0] or 0
@@ -395,7 +392,7 @@ try:
 
     st.markdown("---")
 
-    metrics_custom = conn.execute(f"""
+    metrics_custom = run_query(f"""
             SELECT 
                 COUNT(DISTINCT CASE 
                     WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
@@ -406,7 +403,7 @@ try:
                          AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) 
                     THEN AWB END) AS total_undel_unhrs
             FROM v_inbound {where_sql}
-        """).fetchdf()
+        """)
 
     total_success_unhrs = metrics_custom["total_success_unhrs"][0] or 0
     total_undel_unhrs = metrics_custom["total_undel_unhrs"][0] or 0
@@ -451,12 +448,12 @@ try:
                     Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
                     AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 """
-        df_card_detail = conn.execute(f"""
+        df_card_detail = run_query(f"""
                     SELECT AWB, LAST_LOCATION AS Last_Location, TGL_UPDATE_STATUS_POD, CODING, payment_type AS "Kategori COD / Non-COD", BILNOTE_AMOUNT, RUNSHEET_COURIER_NAME
                     FROM v_inbound
                     {where_sql} AND {card_query_filter}
                     LIMIT 1000
-                """).fetchdf()
+                """)
       else:
         if card_title == "Undel UnHRS":
           card_query_filter = """
@@ -474,13 +471,13 @@ try:
         else:
           card_query_filter = "1=1"
 
-        df_card_detail = conn.execute(f"""
+        df_card_detail = run_query(f"""
                     SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                     FROM v_inbound
                     {where_sql} AND {card_query_filter}
                     ORDER BY age_days DESC
                     LIMIT 1000
-                """).fetchdf()
+                """)
 
       if not df_card_detail.empty:
         st.caption(
@@ -523,7 +520,7 @@ try:
           else "AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')"
       )
 
-      df_aging = conn.execute(f"""
+      df_aging = run_query(f"""
                 SELECT aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} {unrunsheet_status_clause}
@@ -533,7 +530,7 @@ try:
                         WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 
                         WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8
                     END
-            """).fetchdf()
+            """)
 
       selected_aging_group = "Semua Aging"
       col_chart, col_table = st.columns([2, 1])
@@ -599,7 +596,7 @@ try:
           f" [{selected_aging_group}])"
       )
 
-      pivot_matrix = conn.execute(f"""
+      pivot_matrix = run_query(f"""
                 PIVOT (
                     SELECT Status_Shipment, aging_group, AWB 
                     FROM v_inbound {where_sql} {aging_clause}
@@ -607,7 +604,7 @@ try:
                 ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
                 USING COUNT(DISTINCT AWB)
                 GROUP BY Status_Shipment
-            """).fetchdf()
+            """)
 
       if not pivot_matrix.empty:
         pivot_matrix = pivot_matrix.fillna(0)
@@ -626,7 +623,7 @@ try:
           f" [{selected_aging_group}])"
       )
 
-      pivot_loc = conn.execute(f"""
+      pivot_loc = run_query(f"""
                 PIVOT (
                     SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
                     FROM v_inbound
@@ -635,7 +632,7 @@ try:
                 ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
                 USING COUNT(DISTINCT AWB)
                 GROUP BY LAST_LOCATION, Cabang, Zona, Kecamatan
-            """).fetchdf()
+            """)
 
       if not pivot_loc.empty:
         pivot_loc = pivot_loc.fillna(0)
@@ -653,13 +650,13 @@ try:
           f"📋 Detail AWB — Kategori Aging: [{selected_aging_group}]"
       )
 
-      df_detail = conn.execute(f"""
+      df_detail = run_query(f"""
                 SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging Last Inbound (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                 FROM v_inbound
                 {where_sql} {unrunsheet_status_clause} {aging_clause}
                 ORDER BY age_days DESC
                 LIMIT 1000
-            """).fetchdf()
+            """)
 
       st.dataframe(df_detail, use_container_width=True)
 
@@ -667,13 +664,13 @@ try:
       st.subheader(
           "⚠️ Tabel UnInbound (Last Inbound Kosong & Tanpa Runsheet MXG)"
       )
-      df_uninbound_show = conn.execute(f"""
+      df_uninbound_show = run_query(f"""
                 SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging Last Inbound (Hari)", SERVICE, Status_Shipment, HRS
                 FROM v_inbound
                 {where_sql} AND Status_Shipment = 'UnInbound'
                 ORDER BY age_days DESC
                 LIMIT 1000
-            """).fetchdf()
+            """)
 
       if not df_uninbound_show.empty:
         st.dataframe(df_uninbound_show, use_container_width=True)
@@ -703,17 +700,17 @@ try:
           zona_filter_sql,
           target_aging_condition_sql,
       ):
-        tot_all_df = conn.execute(f"""
+        tot_all_df = run_query(f"""
                     SELECT COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {unhrs_filter_sql}
                     AND {zona_filter_sql}
-                """).fetchdf()
+                """)
 
         tot_all_value = tot_all_df["total_awb"][0] or 0
 
-        week_info = conn.execute(f"""
+        week_info = run_query(f"""
                     SELECT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
@@ -721,7 +718,7 @@ try:
                     AND TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-'
                     ORDER BY TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M') DESC
                     LIMIT 1
-                """).fetchdf()
+                """)
 
         current_week = (
             week_info["wk_num"][0]
@@ -730,7 +727,7 @@ try:
         )
         prev_week = current_week - 1 if current_week > 0 else 0
 
-        curr_df = conn.execute(f"""
+        curr_df = run_query(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
                         COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND ({target_aging_condition_sql}) THEN AWB END) as total_hrs_target
@@ -738,13 +735,13 @@ try:
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
                     AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {current_week}
-                """).fetchdf()
+                """)
 
         curr_tot = curr_df["total_kiriman"][0] or 0
         curr_tgt = curr_df["total_hrs_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        prev_df = conn.execute(f"""
+        prev_df = run_query(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
                         COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND ({target_aging_condition_sql}) THEN AWB END) as total_hrs_target
@@ -752,7 +749,7 @@ try:
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
                     AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {prev_week}
-                """).fetchdf()
+                """)
 
         prev_tot = prev_df["total_kiriman"][0] or 0
         prev_tgt = prev_df["total_hrs_target"][0] or 0
@@ -918,8 +915,7 @@ try:
           hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
           hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
 
-        # Query Sangat Cepat Langsung Membaca Parquet
-        df_running_hrs = conn.execute(f"""
+        df_running_hrs = run_query(f"""
                     WITH base AS (
                         SELECT 
                             LAST_LOCATION,
@@ -951,7 +947,7 @@ try:
                         ROUND(h_gt * 100.0 / NULLIF(total_all, 0), 2) AS ">H+7"
                     FROM base
                     ORDER BY LAST_LOCATION ASC
-                """).fetchdf()
+                """)
 
         if not df_running_hrs.empty:
           pct_cols = [
@@ -999,12 +995,12 @@ try:
 
       st.markdown("---")
 
-      cab_counts = conn.execute(f"""
+      cab_counts = run_query(f"""
                 SELECT Cabang, COUNT(DISTINCT AWB) as total
                 FROM v_inbound
                 {where_sql}
                 GROUP BY Cabang
-            """).fetchdf()
+            """)
 
       summary_str = (
           " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join([
@@ -1038,13 +1034,13 @@ try:
             key="exec_granularity",
         )
 
-      min_max_inbound_2026 = conn.execute(f"""
+      min_max_inbound_2026 = run_query(f"""
                 SELECT 
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as min_d, 
                     MAX(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as max_d 
                 FROM v_inbound 
                 {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
-            """).fetchdf()
+            """)
 
       inbound_start = (
           min_max_inbound_2026["min_d"][0]
@@ -1093,7 +1089,7 @@ try:
             " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%B')"
         )
 
-      df_inbound_trend = conn.execute(f"""
+      df_inbound_trend = run_query(f"""
                 SELECT 
                     {date_expr} AS periode,
                     COUNT(DISTINCT AWB) AS total_awb,
@@ -1103,7 +1099,7 @@ try:
                   {inbound_date_clause}
                 GROUP BY 1
                 ORDER BY sort_key ASC
-            """).fetchdf()
+            """)
 
       if not df_inbound_trend.empty:
         fig_inbound = go.Figure()
@@ -1269,12 +1265,12 @@ try:
             mime="text/csv",
         )
 
-      df_unrun = conn.execute(f"""
+      df_unrun = run_query(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM v_inbound
                 {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
-            """).fetchdf()
+            """)
       render_plotly_table_matrix(
           df_unrun,
           "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)",
@@ -1284,13 +1280,13 @@ try:
 
       st.markdown("---")
 
-      df_succ = conn.execute(f"""
+      df_succ = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
-            """).fetchdf()
+            """)
       render_plotly_table_matrix(
           df_succ,
           "📊 3. Matrix Infografis Success UnHRS Per Cabang",
@@ -1300,13 +1296,13 @@ try:
 
       st.markdown("---")
 
-      df_undel = conn.execute(f"""
+      df_undel = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} AND Status_Shipment = 'UNDELIVERY'
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
-            """).fetchdf()
+            """)
       render_plotly_table_matrix(
           df_undel,
           "📊 4. Matrix Infografis Undel UnHRS Per Cabang",
