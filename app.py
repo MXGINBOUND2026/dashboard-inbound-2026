@@ -715,21 +715,31 @@ try:
       )
 
       def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
-        # 1. Total Akumulasi Keseluruhan untuk Nilai Kartu Utama
+        # 1. Total Akumulasi Keseluruhan (Nilai Angka Utama)
         all_df = conn.execute(f"""
                     SELECT 
-                        COUNT(DISTINCT AWB) as total_awb,
-                        COUNT(DISTINCT CASE WHEN wus_aging_group = '{target_aging_code}' THEN AWB END) as target_awb
+                        COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
                 """).fetchdf()
 
         tot_all = all_df["total_awb"][0] or 0
-        tgt_all = all_df["target_awb"][0] or 0
-        pct_all = (tgt_all / tot_all * 100.0) if tot_all > 0 else 0.0
 
-        # 2. Minggu Ini (7 Hari Terakhir) - Menggunakan acuan WUS_DATE untuk data yang sudah terproses/HRS
+        # 2. Ambil Nomor Week Terbaru (Current Week) dan Week Sebelumnya (Previous Week)
+        week_info = conn.execute(f"""
+                    SELECT 
+                        WEEK(CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE)) as wk_num
+                    FROM v_inbound {where_sql}
+                    AND COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) IS NOT NULL
+                    ORDER BY CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE) DESC
+                    LIMIT 1
+                """).fetchdf()
+
+        current_week = week_info["wk_num"][0] if not week_info.empty and pd.notnull(week_info["wk_num"][0]) else 0
+        prev_week = current_week - 1 if current_week > 0 else 0
+
+        # 3. Capaian Week Saat Ini (Contoh: Week 41)
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -737,14 +747,14 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND CAST(WUS_DATE AS DATE) >= CURRENT_DATE - INTERVAL 7 DAY
+                    AND WEEK(CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE)) = {current_week}
                 """).fetchdf()
 
         curr_tot = curr_df["total_kiriman"][0] or 0
         curr_tgt = curr_df["total_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        # 3. Minggu Lalu (14 s/d 7 Hari Lalu) - Menggunakan acuan WUS_DATE
+        # 4. Capaian Week Sebelumnya (Contoh: Week 40)
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -752,40 +762,42 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND CAST(WUS_DATE AS DATE) >= CURRENT_DATE - INTERVAL 14 DAY
-                    AND CAST(WUS_DATE AS DATE) < CURRENT_DATE - INTERVAL 7 DAY
+                    AND WEEK(CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE)) = {prev_week}
                 """).fetchdf()
 
         prev_tot = prev_df["total_kiriman"][0] or 0
         prev_tgt = prev_df["total_target"][0] or 0
         prev_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
 
+        # Selisih Perbandingan Minggu ke Minggu (WoW)
         wow_diff = curr_pct - prev_pct
-        return tot_all, pct_all, wow_diff
+        return tot_all, curr_pct, wow_diff, current_week, prev_week
 
-      succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
+      succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
           status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_code="H+0",
       )
 
-      succ_c_vol, succ_c_pct, succ_c_wow = get_kpi_metrics(
+      succ_c_vol, succ_c_pct, succ_c_wow, _, _ = get_kpi_metrics(
           status_filter_sql="Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_code="H+1",
       )
 
-      undel_ab_vol, undel_ab_pct, undel_ab_wow = get_kpi_metrics(
+      undel_ab_vol, undel_ab_pct, undel_ab_wow, _, _ = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_code="H+0",
       )
 
-      undel_c_vol, undel_c_pct, undel_c_wow = get_kpi_metrics(
+      undel_c_vol, undel_c_pct, undel_c_wow, _, _ = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_code="H+1",
       )
+
+      st.caption(f"📌 Perbandingan Performansi: **Week {cur_w}** vs **Week {prv_w}**")
 
       k1, k2, k3, k4 = st.columns(4)
       with k1:
