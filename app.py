@@ -714,7 +714,7 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-      def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
+     def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
         # 1. Total Akumulasi Keseluruhan (Nilai Angka Utama)
         all_df = conn.execute(f"""
                     SELECT 
@@ -726,20 +726,20 @@ try:
 
         tot_all = all_df["total_awb"][0] or 0
 
-        # 2. Ambil Nomor Week Terbaru (Current Week) dan Week Sebelumnya (Previous Week)
+        # 2. Ambil Nomor Week Terbaru berdasarkan TGL_UPDATE_STATUS_POD atau WUS_DATE
         week_info = conn.execute(f"""
                     SELECT 
-                        WEEK(CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE)) as wk_num
+                        WEEK(CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE)) as wk_num
                     FROM v_inbound {where_sql}
-                    AND COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) IS NOT NULL
-                    ORDER BY CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE) DESC
+                    AND COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) IS NOT NULL
+                    ORDER BY CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE) DESC
                     LIMIT 1
                 """).fetchdf()
 
-        current_week = week_info["wk_num"][0] if not week_info.empty and pd.notnull(week_info["wk_num"][0]) else 0
+        current_week = week_info["wk_num"][0] if not week_info.empty and pd.notnull(week_info["wk_num"][0]) else 43
         prev_week = current_week - 1 if current_week > 0 else 0
 
-        # 3. Capaian Week Saat Ini (Contoh: Week 41)
+        # 3. Capaian Week Saat Ini (Current Week)
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -747,14 +747,14 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE)) = {current_week}
+                    AND WEEK(CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE)) = {current_week}
                 """).fetchdf()
 
         curr_tot = curr_df["total_kiriman"][0] or 0
         curr_tgt = curr_df["total_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        # 4. Capaian Week Sebelumnya (Contoh: Week 40)
+        # 4. Capaian Week Sebelumnya (Previous Week)
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -762,14 +762,13 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(CAST(COALESCE(WUS_DATE, TGL_UPDATE_STATUS_POD) AS DATE)) = {prev_week}
+                    AND WEEK(CAST(COALESCE(TGL_UPDATE_STATUS_POD, WUS_DATE) AS DATE)) = {prev_week}
                 """).fetchdf()
 
         prev_tot = prev_df["total_kiriman"][0] or 0
         prev_tgt = prev_df["total_target"][0] or 0
         prev_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
 
-        # Selisih Perbandingan Minggu ke Minggu (WoW)
         wow_diff = curr_pct - prev_pct
         return tot_all, curr_pct, wow_diff, current_week, prev_week
 
