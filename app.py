@@ -714,7 +714,7 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-    def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
+      def get_kpi_metrics(status_filter_sql, zona_filter_sql, target_aging_code):
         # 1. Total Akumulasi Keseluruhan (Nilai Angka Utama)
         all_df = conn.execute(f"""
                     SELECT 
