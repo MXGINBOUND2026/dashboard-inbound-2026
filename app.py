@@ -702,7 +702,7 @@ try:
           zona_filter_sql,
           target_aging_condition_sql,
       ):
-        # 1. Menghitung Total Angka Utama Card (Seluruh UnHRS All Aging)
+        # 1. Total UnHRS All Aging
         tot_all_df = conn.execute(f"""
                     SELECT COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
@@ -713,7 +713,7 @@ try:
 
         tot_all_value = tot_all_df["total_awb"][0] or 0
 
-        # 2. Menentukan Minggu Berjalan & Minggu Sebelumnya dari Data Aktual POD Update
+        # 2. Penentuan Minggu Berjalan
         week_info = conn.execute(f"""
                     SELECT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
                     FROM v_inbound {where_sql}
@@ -731,7 +731,7 @@ try:
         )
         prev_week = current_week - 1 if current_week > 0 else 0
 
-        # 3. Menghitung Persentase Minggu Ini dengan Akumulasi Target Aging (Zona A&B: <=H+0, Zona C: <=H+1)
+        # 3. Persentase Minggu Ini
         curr_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -746,7 +746,7 @@ try:
         curr_tgt = curr_df["total_hrs_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        # 4. Menghitung Persentase Minggu Sebelumnya
+        # 4. Persentase Minggu Sebelumnya
         prev_df = conn.execute(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -764,7 +764,7 @@ try:
         wow_diff = curr_pct - prev_pct
         return tot_all_value, curr_pct, wow_diff, current_week, prev_week
 
-      # Akumulasi Aging Target: Zona A&B target H+0 (hrs_aging_group = 'H+0'), Zona C target H+1 (hrs_aging_group IN ('H+0', 'H+1'))
+      # Menghitung 4 Card Metrics
       succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
           status_filter_sql=(
               "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
@@ -802,47 +802,215 @@ try:
           f" {prv_w}**"
       )
 
-      # Fungsi bantu untuk label metric dengan Logo Alert jika capaian di bawah 90% dari target 100%
-      def format_metric_label(base_label, pct_val):
-        return f"🚨 {base_label} (Jauh dari Target)" if pct_val < 90.0 else base_label
+      # Kriteria Alert: Di bawah 95% = Merah 🚨, Di atas/sama dengan 95% = Hijau ✅
+      def get_status_alert_badge(title, pct_val, wow_val):
+        status_icon = "✅" if pct_val >= 95.0 else "🚨"
+        status_text = (
+            "Target Achieved" if pct_val >= 95.0 else "Below Target (<95%)"
+        )
+        badge_color = "#28a745" if pct_val >= 95.0 else "#dc3545"
 
-      k1, k2, k3, k4 = st.columns(4)
-      with k1:
-        st.metric(
-            label=format_metric_label(
-                "🎯 Success UnHRS (Zona A&B | H+0)", succ_ab_pct
+        wow_color = "#28a745" if wow_val >= 0 else "#dc3545"
+        wow_sign = "+" if wow_val >= 0 else ""
+
+        return f"""
+        <div style="background-color: #1e1e1e; padding: 12px; border-radius: 8px; border-left: 5px solid {badge_color}; margin-bottom: 10px;">
+            <div style="font-size: 13px; color: #aaaaaa; font-weight: 600;">{status_icon} {title}</div>
+            <div style="font-size: 11px; color: {badge_color}; font-weight: bold; margin-top: 2px;">{status_text}</div>
+            <div style="font-size: 24px; font-weight: bold; color: #ffffff; margin: 4px 0;">{pct_val:.1f}%</div>
+            <div style="font-size: 12px; color: #cccccc;">
+                Capaian <span style="color: {wow_color}; font-weight: bold;">({wow_sign}{wow_val:.1f}% WoW)</span>
+            </div>
+        </div>
+        """
+
+      # Tampilan 4 Card Header kustom
+      kc1, kc2, kc3, kc4 = st.columns(4)
+      with kc1:
+        st.markdown(
+            get_status_alert_badge(
+                "Success UnHRS (Zona A&B | H+0)", succ_ab_pct, succ_ab_wow
             ),
-            value=f"{succ_ab_vol:,} AWB",
-            delta=f"{succ_ab_pct:.1f}% ({succ_ab_wow:+.1f}% WoW)",
-            delta_color="normal" if succ_ab_wow >= 0 else "inverse",
+            unsafe_allow_html=True,
         )
-      with k2:
-        st.metric(
-            label=format_metric_label(
-                "🎯 Success UnHRS (Zona C | $\le$ H+1)", succ_c_pct
+        st.caption(f"📦 Total UnHRS: **{succ_ab_vol:,} AWB**")
+
+      with kc2:
+        st.markdown(
+            get_status_alert_badge(
+                "Success UnHRS (Zona C | ≤ H+1)", succ_c_pct, succ_c_wow
             ),
-            value=f"{succ_c_vol:,} AWB",
-            delta=f"{succ_c_pct:.1f}% ({succ_c_wow:+.1f}% WoW)",
-            delta_color="normal" if succ_c_wow >= 0 else "inverse",
+            unsafe_allow_html=True,
         )
-      with k3:
-        st.metric(
-            label=format_metric_label(
-                "⚠️ Undel UnHRS (Zona A&B | H+0)", undel_ab_pct
+        st.caption(f"📦 Total UnHRS: **{succ_c_vol:,} AWB**")
+
+      with kc3:
+        st.markdown(
+            get_status_alert_badge(
+                "Undel UnHRS (Zona A&B | H+0)", undel_ab_pct, undel_ab_wow
             ),
-            value=f"{undel_ab_vol:,} AWB",
-            delta=f"{undel_ab_pct:.1f}% ({undel_ab_wow:+.1f}% WoW)",
-            delta_color="normal" if undel_ab_wow >= 0 else "inverse",
+            unsafe_allow_html=True,
         )
-      with k4:
-        st.metric(
-            label=format_metric_label(
-                "⚠️ Undel UnHRS (Zona C | $\le$ H+1)", undel_c_pct
+        st.caption(f"📦 Total UnHRS: **{undel_ab_vol:,} AWB**")
+
+      with kc4:
+        st.markdown(
+            get_status_alert_badge(
+                "Undel UnHRS (Zona C | ≤ H+1)", undel_c_pct, undel_c_wow
             ),
-            value=f"{undel_c_vol:,} AWB",
-            delta=f"{undel_c_pct:.1f}% ({undel_c_wow:+.1f}% WoW)",
-            delta_color="normal" if undel_c_wow >= 0 else "inverse",
+            unsafe_allow_html=True,
         )
+        st.caption(f"📦 Total UnHRS: **{undel_c_vol:,} AWB**")
+
+      st.markdown("---")
+
+      # =========================================================
+      # FITUR BARU: TOMBOL DETAIL CAPAIAN RUNNING TOTAL HRS
+      # =========================================================
+      if "selected_hrs_category" not in st.session_state:
+        st.session_state.selected_hrs_category = None
+
+      st.subheader("🔍 Detail Capaian HRS (Running Total Persentase Aging)")
+      st.caption(
+          "Pilih tombol kategori di bawah untuk menampilkan matriks persentase"
+          " running total H+0 s/d >H+7 per Last Location:"
+      )
+
+      b1, b2, b3, b4 = st.columns(4)
+      with b1:
+        if st.button(
+            "📋 Detail Success (Zona A&B)",
+            use_container_width=True,
+            key="btn_det_succ_ab",
+        ):
+          st.session_state.selected_hrs_category = "Success Zona A&B"
+      with b2:
+        if st.button(
+            "📋 Detail Success (Zona C)",
+            use_container_width=True,
+            key="btn_det_succ_c",
+        ):
+          st.session_state.selected_hrs_category = "Success Zona C"
+      with b3:
+        if st.button(
+            "📋 Detail Undel (Zona A&B)",
+            use_container_width=True,
+            key="btn_det_undel_ab",
+        ):
+          st.session_state.selected_hrs_category = "Undel Zona A&B"
+      with b4:
+        if st.button(
+            "📋 Detail Undel (Zona C)",
+            use_container_width=True,
+            key="btn_det_undel_c",
+        ):
+          st.session_state.selected_hrs_category = "Undel Zona C"
+
+      if st.session_state.selected_hrs_category:
+        hrs_cat = st.session_state.selected_hrs_category
+        st.markdown(f"#### 📊 Matriks Running Total HRS: [{hrs_cat}]")
+
+        if hrs_cat == "Success Zona A&B":
+          hrs_status_sql = (
+              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
+          )
+          hrs_zona_sql = "UPPER(TRIM(Zona)) IN ('A', 'B')"
+        elif hrs_cat == "Success Zona C":
+          hrs_status_sql = (
+              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
+          )
+          hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
+        elif hrs_cat == "Undel Zona A&B":
+          hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
+          hrs_zona_sql = "UPPER(TRIM(Zona)) IN ('A', 'B')"
+        else:
+          hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
+          hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
+
+        # Query Running Total Persentase
+        df_running_hrs = conn.execute(f"""
+                    WITH base AS (
+                        SELECT 
+                            LAST_LOCATION,
+                            COUNT(DISTINCT AWB) as total_all,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group = 'H+0' THEN AWB END) as h0,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) as h1,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2') THEN AWB END) as h2,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3') THEN AWB END) as h3,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4') THEN AWB END) as h4,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5') THEN AWB END) as h5,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6') THEN AWB END) as h6,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7') THEN AWB END) as h7,
+                            COUNT(DISTINCT CASE WHEN hrs_aging_group IS NOT NULL AND hrs_aging_group != '-' THEN AWB END) as h_gt
+                        FROM v_inbound {where_sql}
+                        AND {hrs_status_sql}
+                        AND {hrs_zona_sql}
+                        GROUP BY LAST_LOCATION
+                    )
+                    SELECT 
+                        LAST_LOCATION,
+                        ROUND(h0 * 100.0 / NULLIF(total_all, 0), 2) AS "H+0",
+                        ROUND(h1 * 100.0 / NULLIF(total_all, 0), 2) AS "H+1",
+                        ROUND(h2 * 100.0 / NULLIF(total_all, 0), 2) AS "H+2",
+                        ROUND(h3 * 100.0 / NULLIF(total_all, 0), 2) AS "H+3",
+                        ROUND(h4 * 100.0 / NULLIF(total_all, 0), 2) AS "H+4",
+                        ROUND(h5 * 100.0 / NULLIF(total_all, 0), 2) AS "H+5",
+                        ROUND(h6 * 100.0 / NULLIF(total_all, 0), 2) AS "H+6",
+                        ROUND(h7 * 100.0 / NULLIF(total_all, 0), 2) AS "H+7",
+                        ROUND(h_gt * 100.0 / NULLIF(total_all, 0), 2) AS ">H+7"
+                    FROM base
+                    ORDER BY LAST_LOCATION ASC
+                """).fetchdf()
+
+        if not df_running_hrs.empty:
+
+          def highlight_running_pct(val):
+            if pd.isna(val) or val == 0:
+              return ""
+            if val >= 95.0:
+              return "background-color: #28a745; color: white; font-weight: bold;"
+            elif val >= 80.0:
+              return (
+                  "background-color: #ffc107; color: black; font-weight: bold;"
+              )
+            else:
+              return "background-color: #dc3545; color: white; font-weight: bold;"
+
+          pct_cols = [
+              "H+0",
+              "H+1",
+              "H+2",
+              "H+3",
+              "H+4",
+              "H+5",
+              "H+6",
+              "H+7",
+              ">H+7",
+          ]
+          styled_df = df_running_hrs.style.applymap(
+              highlight_running_pct, subset=pct_cols
+          ).format({col: "{:.2f}%" for col in pct_cols})
+
+          st.dataframe(styled_df, use_container_width=True)
+
+          col_dl, col_cls = st.columns([3, 1])
+          with col_dl:
+            csv_run = df_running_hrs.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label=f"📥 Download Data Matrix Running Total [{hrs_cat}] (CSV)",
+                data=csv_run,
+                file_name=f"Matrix_Running_Total_{hrs_cat.replace(' ', '_')}.csv",
+                mime="text/csv",
+            )
+          with col_cls:
+            if st.button("❌ Tutup Tabel Detail"):
+              st.session_state.selected_hrs_category = None
+              st.rerun()
+        else:
+          st.info(
+              f"Tidak ada data untuk kategori [{hrs_cat}] dengan filter yang"
+              " aktif."
+          )
 
       st.markdown("---")
 
