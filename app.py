@@ -152,25 +152,22 @@ try:
                 THEN 'COD' 
                 ELSE 'Non COD' 
             END AS payment_type,
+            
+            -- Hitung selisih hari dari TGL_UPDATE_STATUS_POD ke CURRENT_DATE secara langsung & ringan
+            DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) AS wus_aging_days,
+            
+            -- Pengelompokan aging H+0 sampai >H+7
             CASE 
-                WHEN TGL_UPDATE_STATUS_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN 
-                    GREATEST(0, DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)))
-                ELSE NULL 
-            END as wus_aging_days,
-            CASE 
-                WHEN TGL_UPDATE_STATUS_POD IS NOT NULL AND WUS_DATE IS NOT NULL THEN
-                    CASE 
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) <= 0 THEN 'H+0'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 1 THEN 'H+1'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 2 THEN 'H+2'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 3 THEN 'H+3'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 6 THEN 'H+6'
-                        WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CAST(WUS_DATE AS DATE)) = 7 THEN 'H+7'
-                        ELSE '>H+7'
-                    END
-                ELSE 'H+0'
+                WHEN TGL_UPDATE_STATUS_POD IS NULL THEN NULL
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) <= 0 THEN 'H+0'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 1 THEN 'H+1'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 2 THEN 'H+2'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
+                WHEN DATEDIFF('day', CAST(TGL_UPDATE_STATUS_POD AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
+                ELSE '>H+7'
             END AS wus_aging_group
         FROM read_parquet('{LOCAL_PARQUET_PATH}')
     """)
