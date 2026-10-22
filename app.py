@@ -101,18 +101,16 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 
 
 # =========================================================
-# ULTRA LIGHTWEIGHT CACHED QUERY FUNCTION
+# ULTRA LIGHTWEIGHT & AGGRESSIVE CACHED QUERY FUNCTION
 # =========================================================
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def run_query(sql_query):
   con = duckdb.connect()
   con.execute("SET memory_limit='256MB';")
-
   con.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
         SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')
     """)
-
   df_res = con.execute(sql_query).fetchdf()
   con.close()
   return df_res
@@ -288,7 +286,9 @@ try:
                 COUNT(DISTINCT AWB) AS total_awb,
                 COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnInbound' THEN AWB END) AS total_uninbound,
                 COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) AS total_unrunsheet,
-                COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra
+                COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra,
+                COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) AS total_success_unhrs,
+                COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) AS total_undel_unhrs
             FROM v_inbound {where_sql}
         """)
 
@@ -296,6 +296,8 @@ try:
     total_uninbound = metrics_res["total_uninbound"][0] or 0
     total_unrunsheet = metrics_res["total_unrunsheet"][0] or 0
     total_unrunsheet_pra = metrics_res["total_unrunsheet_pra"][0] or 0
+    total_success_unhrs = metrics_res["total_success_unhrs"][0] or 0
+    total_undel_unhrs = metrics_res["total_undel_unhrs"][0] or 0
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -336,22 +338,6 @@ try:
         st.rerun()
 
     st.markdown("---")
-
-    metrics_custom = run_query(f"""
-            SELECT 
-                COUNT(DISTINCT CASE 
-                    WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') 
-                         AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) 
-                    THEN AWB END) AS total_success_unhrs,
-                COUNT(DISTINCT CASE 
-                    WHEN Status_Shipment = 'UNDELIVERY' 
-                         AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) 
-                    THEN AWB END) AS total_undel_unhrs
-            FROM v_inbound {where_sql}
-        """)
-
-    total_success_unhrs = metrics_custom["total_success_unhrs"][0] or 0
-    total_undel_unhrs = metrics_custom["total_undel_unhrs"][0] or 0
 
     col_m1, col_m2 = st.columns(2)
     with col_m1:
@@ -631,7 +617,7 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC
+  # TAB 2: SUMMARY EXEC (SUPER OPTIMIZED SINGLE-PASS METRICS)
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
@@ -665,110 +651,98 @@ try:
 
       prev_week_val = selected_week - 1 if selected_week > 0 else 0
 
-      def get_kpi_metrics(
-          status_filter_sql,
-          unhrs_filter_sql,
-          zona_filter_sql,
-          target_aging_condition_sql,
-          target_week,
-          comparison_week,
-      ):
-        tot_all_df = run_query(f"""
-                    SELECT COUNT(DISTINCT AWB) as total_awb
-                    FROM v_inbound {where_sql}
-                    AND {status_filter_sql}
-                    AND {unhrs_filter_sql}
-                    AND {zona_filter_sql}
-                """)
-        tot_all_value = tot_all_df["total_awb"][0] or 0
+      # OPTIMASI UTAMA: Menghitung seluruh 4 Card KPI dalam 1 Query SQL Tunggal
+      kpi_batch_df = run_query(f"""
+                SELECT 
+                    -- 1. Success AB
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_vol,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} THEN AWB END) AS succ_ab_curr_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_curr_tgt,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} THEN AWB END) AS succ_ab_prev_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_prev_tgt,
 
-        curr_df = run_query(f"""
-                    SELECT 
-                        COUNT(DISTINCT AWB) as total_kiriman,
-                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND ({target_aging_condition_sql}) THEN AWB END) as total_hrs_target
-                    FROM v_inbound {where_sql}
-                    AND {status_filter_sql}
-                    AND {zona_filter_sql}
-                    AND pod_week_num = {target_week}
-                """)
+                    -- 2. Success C
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_vol,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} THEN AWB END) AS succ_c_curr_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_curr_tgt,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS succ_c_prev_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_prev_tgt,
 
-        curr_tot = curr_df["total_kiriman"][0] or 0
-        curr_tgt = curr_df["total_hrs_target"][0] or 0
-        curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
+                    -- 3. Undel AB
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_vol,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} THEN AWB END) AS undel_ab_curr_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_curr_tgt,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_ab_prev_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_prev_tgt,
 
-        prev_df = run_query(f"""
-                    SELECT 
-                        COUNT(DISTINCT AWB) as total_kiriman,
-                        COUNT(DISTINCT CASE WHEN HRS IN ('HRS', 'HOC', 'HRI') AND ({target_aging_condition_sql}) THEN AWB END) as total_hrs_target
-                    FROM v_inbound {where_sql}
-                    AND {status_filter_sql}
-                    AND {zona_filter_sql}
-                    AND pod_week_num = {comparison_week}
-                """)
+                    -- 4. Undel C
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS undel_c_vol,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} THEN AWB END) AS undel_c_curr_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_curr_tgt,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_c_prev_tot,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_prev_tgt
+                FROM v_inbound {where_sql}
+            """)
 
-        prev_tot = prev_df["total_kiriman"][0] or 0
-        prev_tgt = prev_df["total_hrs_target"][0] or 0
-        prev_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
+    if not kpi_batch_df.empty:
+      r = kpi_batch_df.iloc[0]
 
-        wow_diff = curr_pct - prev_pct
-        return tot_all_value, curr_pct, wow_diff
+      def calc_pct_and_wow(curr_tgt, curr_tot, prev_tgt, prev_tot):
+        c_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
+        p_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
+        return c_pct, (c_pct - p_pct)
 
-      succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
-          status_filter_sql=(
-              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
-          ),
-          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
-          zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
-          target_aging_condition_sql="hrs_aging_group = 'H+0'",
-          target_week=selected_week,
-          comparison_week=prev_week_val,
+      succ_ab_vol = r["succ_ab_vol"] or 0
+      succ_ab_pct, succ_ab_wow = calc_pct_and_wow(
+          r["succ_ab_curr_tgt"],
+          r["succ_ab_curr_tot"],
+          r["succ_ab_prev_tgt"],
+          r["succ_ab_prev_tot"],
       )
 
-      succ_c_vol, succ_c_pct, succ_c_wow = get_kpi_metrics(
-          status_filter_sql=(
-              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
-          ),
-          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
-          zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
-          target_aging_condition_sql="hrs_aging_group IN ('H+0', 'H+1')",
-          target_week=selected_week,
-          comparison_week=prev_week_val,
+      succ_c_vol = r["succ_c_vol"] or 0
+      succ_c_pct, succ_c_wow = calc_pct_and_wow(
+          r["succ_c_curr_tgt"],
+          r["succ_c_curr_tot"],
+          r["succ_c_prev_tgt"],
+          r["succ_c_prev_tot"],
       )
 
-      undel_ab_vol, undel_ab_pct, undel_ab_wow = get_kpi_metrics(
-          status_filter_sql="Status_Shipment = 'UNDELIVERY'",
-          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
-          zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
-          target_aging_condition_sql="hrs_aging_group = 'H+0'",
-          target_week=selected_week,
-          comparison_week=prev_week_val,
+      undel_ab_vol = r["undel_ab_vol"] or 0
+      undel_ab_pct, undel_ab_wow = calc_pct_and_wow(
+          r["undel_ab_curr_tgt"],
+          r["undel_ab_curr_tot"],
+          r["undel_ab_prev_tgt"],
+          r["undel_ab_prev_tot"],
       )
 
-      undel_c_vol, undel_c_pct, undel_c_wow = get_kpi_metrics(
-          status_filter_sql="Status_Shipment = 'UNDELIVERY'",
-          unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
-          zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
-          target_aging_condition_sql="hrs_aging_group IN ('H+0', 'H+1')",
-          target_week=selected_week,
-          comparison_week=prev_week_val,
+      undel_c_vol = r["undel_c_vol"] or 0
+      undel_c_pct, undel_c_wow = calc_pct_and_wow(
+          r["undel_c_curr_tgt"],
+          r["undel_c_curr_tot"],
+          r["undel_c_prev_tgt"],
+          r["undel_c_prev_tot"],
       )
+    else:
+      succ_ab_vol = succ_c_vol = undel_ab_vol = undel_c_vol = 0
+      succ_ab_pct = succ_c_pct = undel_ab_pct = undel_c_pct = 0.0
+      succ_ab_wow = succ_c_wow = undel_ab_wow = undel_c_wow = 0.0
 
-      st.caption(
-          f"📌 Perbandingan Performansi WUS: **Week {selected_week}** vs **Week"
-          f" {prev_week_val}**"
+    st.caption(
+        f"📌 Perbandingan Performansi WUS: **Week {selected_week}** vs **Week"
+        f" {prev_week_val}**"
+    )
+
+    def get_status_alert_badge(title, total_vol, pct_val, wow_val):
+      status_icon = "✅" if pct_val >= 95.0 else "🚨"
+      status_text = (
+          "Target Achieved" if pct_val >= 95.0 else "Below Target (<95%)"
       )
+      badge_color = "#28a745" if pct_val >= 95.0 else "#dc3545"
+      wow_color = "#28a745" if wow_val >= 0 else "#dc3545"
+      wow_sign = "+" if wow_val >= 0 else ""
 
-      def get_status_alert_badge(title, total_vol, pct_val, wow_val):
-        status_icon = "✅" if pct_val >= 95.0 else "🚨"
-        status_text = (
-            "Target Achieved" if pct_val >= 95.0 else "Below Target (<95%)"
-        )
-        badge_color = "#28a745" if pct_val >= 95.0 else "#dc3545"
-
-        wow_color = "#28a745" if wow_val >= 0 else "#dc3545"
-        wow_sign = "+" if wow_val >= 0 else ""
-
-        return f"""
+      return f"""
         <div style="background-color: #1e1e1e; padding: 14px; border-radius: 8px; border-left: 5px solid {badge_color}; margin-bottom: 10px;">
             <div style="font-size: 13px; color: #aaaaaa; font-weight: 600;">{status_icon} {title}</div>
             <div style="font-size: 11px; color: {badge_color}; font-weight: bold; margin-top: 2px;">{status_text}</div>
@@ -779,114 +753,111 @@ try:
         </div>
         """
 
-      kc1, kc2, kc3, kc4 = st.columns(4)
-      with kc1:
-        st.markdown(
-            get_status_alert_badge(
-                "Success UnHRS (Zona A&B | H+0)",
-                succ_ab_vol,
-                succ_ab_pct,
-                succ_ab_wow,
-            ),
-            unsafe_allow_html=True,
-        )
-
-      with kc2:
-        st.markdown(
-            get_status_alert_badge(
-                "Success UnHRS (Zona C | ≤ H+1)",
-                succ_c_vol,
-                succ_c_pct,
-                succ_c_wow,
-            ),
-            unsafe_allow_html=True,
-        )
-
-      with kc3:
-        st.markdown(
-            get_status_alert_badge(
-                "Undel UnHRS (Zona A&B | H+0)",
-                undel_ab_vol,
-                undel_ab_pct,
-                undel_ab_wow,
-            ),
-            unsafe_allow_html=True,
-        )
-
-      with kc4:
-        st.markdown(
-            get_status_alert_badge(
-                "Undel UnHRS (Zona C | ≤ H+1)",
-                undel_c_vol,
-                undel_c_pct,
-                undel_c_wow,
-            ),
-            unsafe_allow_html=True,
-        )
-
-      st.markdown("---")
-
-      if "selected_hrs_category" not in st.session_state:
-        st.session_state.selected_hrs_category = None
-
-      st.subheader("🔍 Detail Capaian HRS (Running Total Persentase Aging)")
-      st.caption(
-          "Pilih tombol kategori di bawah untuk menampilkan matriks persentase"
-          " running total H+0 s/d >H+7 per Last Location:"
+    kc1, kc2, kc3, kc4 = st.columns(4)
+    with kc1:
+      st.markdown(
+          get_status_alert_badge(
+              "Success UnHRS (Zona A&B | H+0)",
+              succ_ab_vol,
+              succ_ab_pct,
+              succ_ab_wow,
+          ),
+          unsafe_allow_html=True,
+      )
+    with kc2:
+      st.markdown(
+          get_status_alert_badge(
+              "Success UnHRS (Zona C | ≤ H+1)",
+              succ_c_vol,
+              succ_c_pct,
+              succ_c_wow,
+          ),
+          unsafe_allow_html=True,
+      )
+    with kc3:
+      st.markdown(
+          get_status_alert_badge(
+              "Undel UnHRS (Zona A&B | H+0)",
+              undel_ab_vol,
+              undel_ab_pct,
+              undel_ab_wow,
+          ),
+          unsafe_allow_html=True,
+      )
+    with kc4:
+      st.markdown(
+          get_status_alert_badge(
+              "Undel UnHRS (Zona C | ≤ H+1)",
+              undel_c_vol,
+              undel_c_pct,
+              undel_c_wow,
+          ),
+          unsafe_allow_html=True,
       )
 
-      b1, b2, b3, b4 = st.columns(4)
-      with b1:
-        if st.button(
-            "📋 Detail Success (Zona A&B)",
-            use_container_width=True,
-            key="btn_det_succ_ab",
-        ):
-          st.session_state.selected_hrs_category = "Success Zona A&B"
-      with b2:
-        if st.button(
-            "📋 Detail Success (Zona C)",
-            use_container_width=True,
-            key="btn_det_succ_c",
-        ):
-          st.session_state.selected_hrs_category = "Success Zona C"
-      with b3:
-        if st.button(
-            "📋 Detail Undel (Zona A&B)",
-            use_container_width=True,
-            key="btn_det_undel_ab",
-        ):
-          st.session_state.selected_hrs_category = "Undel Zona A&B"
-      with b4:
-        if st.button(
-            "📋 Detail Undel (Zona C)",
-            use_container_width=True,
-            key="btn_det_undel_c",
-        ):
-          st.session_state.selected_hrs_category = "Undel Zona C"
+    st.markdown("---")
 
-      if st.session_state.selected_hrs_category:
-        hrs_cat = st.session_state.selected_hrs_category
-        st.markdown(f"#### 📊 Matriks Running Total HRS: [{hrs_cat}]")
+    if "selected_hrs_category" not in st.session_state:
+      st.session_state.selected_hrs_category = None
 
-        if hrs_cat == "Success Zona A&B":
-          hrs_status_sql = (
-              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
-          )
-          hrs_zona_sql = "UPPER(TRIM(Zona)) IN ('A', 'B')"
-        elif hrs_cat == "Success Zona C":
-          hrs_status_sql = (
-              "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
-          )
-          hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
-        elif hrs_cat == "Undel Zona A&B":
-          hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
-          hrs_zona_sql = "UPPER(TRIM(Zona)) IN ('A', 'B')"
-        else:
-          hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
-          hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
+    st.subheader("🔍 Detail Capaian HRS (Running Total Persentase Aging)")
+    st.caption(
+        "Pilih tombol kategori di bawah untuk menampilkan matriks persentase"
+        " running total H+0 s/d >H+7 per Last Location:"
+    )
 
-        df_running_hrs = run_query(f"""
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+      if st.button(
+          "📋 Detail Success (Zona A&B)",
+          use_container_width=True,
+          key="btn_det_succ_ab",
+      ):
+        st.session_state.selected_hrs_category = "Success Zona A&B"
+    with b2:
+      if st.button(
+          "📋 Detail Success (Zona C)",
+          use_container_width=True,
+          key="btn_det_succ_c",
+      ):
+        st.session_state.selected_hrs_category = "Success Zona C"
+    with b3:
+      if st.button(
+          "📋 Detail Undel (Zona A&B)",
+          use_container_width=True,
+          key="btn_det_undel_ab",
+      ):
+        st.session_state.selected_hrs_category = "Undel Zona A&B"
+    with b4:
+      if st.button(
+          "📋 Detail Undel (Zona C)",
+          use_container_width=True,
+          key="btn_det_undel_c",
+      ):
+        st.session_state.selected_hrs_category = "Undel Zona C"
+
+    if st.session_state.selected_hrs_category:
+      hrs_cat = st.session_state.selected_hrs_category
+      st.markdown(f"#### 📊 Matriks Running Total HRS: [{hrs_cat}]")
+
+      if hrs_cat == "Success Zona A&B":
+        hrs_status_sql = (
+            "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
+        )
+        hrs_zona_sql = "UPPER(TRIM(Zona)) IN ('A', 'B')"
+      elif hrs_cat == "Success Zona C":
+        hrs_status_sql = (
+            "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
+        )
+        hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
+      elif hrs_cat == "Undel Zona A&B":
+        hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
+        hrs_zona_sql = "UPPER(TRIM(Zona)) IN ('A', 'B')"
+      else:
+        hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
+        hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
+
+      df_running_hrs = run_query(f"""
                     WITH base AS (
                         SELECT 
                             LAST_LOCATION,
@@ -920,92 +891,90 @@ try:
                     ORDER BY LAST_LOCATION ASC
                 """)
 
-        if not df_running_hrs.empty:
-          pct_cols = [
-              "H+0",
-              "H+1",
-              "H+2",
-              "H+3",
-              "H+4",
-              "H+5",
-              "H+6",
-              "H+7",
-              ">H+7",
-          ]
-          column_config = {
-              c: st.column_config.NumberColumn(
-                  label=c, format="%.2f%%", min_value=0, max_value=100
-              )
-              for c in pct_cols
-          }
-
-          st.dataframe(
-              df_running_hrs,
-              column_config=column_config,
-              use_container_width=True,
-          )
-
-          col_dl, col_cls = st.columns([3, 1])
-          with col_dl:
-            csv_run = df_running_hrs.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label=f"📥 Download Data Matrix Running Total [{hrs_cat}] (CSV)",
-                data=csv_run,
-                file_name=f"Matrix_Running_Total_{hrs_cat.replace(' ', '_')}.csv",
-                mime="text/csv",
+      if not df_running_hrs.empty:
+        pct_cols = [
+            "H+0",
+            "H+1",
+            "H+2",
+            "H+3",
+            "H+4",
+            "H+5",
+            "H+6",
+            "H+7",
+            ">H+7",
+        ]
+        column_config = {
+            c: st.column_config.NumberColumn(
+                label=c, format="%.2f%%", min_value=0, max_value=100
             )
-          with col_cls:
-            if st.button("❌ Tutup Tabel Detail"):
-              st.session_state.selected_hrs_category = None
-              st.rerun()
-        else:
-          st.info(
-              f"Tidak ada data untuk kategori [{hrs_cat}] dengan filter yang"
-              " aktif."
+            for c in pct_cols
+        }
+
+        st.dataframe(
+            df_running_hrs, column_config=column_config, use_container_width=True
+        )
+
+        col_dl, col_cls = st.columns([3, 1])
+        with col_dl:
+          csv_run = df_running_hrs.to_csv(index=False).encode("utf-8")
+          st.download_button(
+              label=f"📥 Download Data Matrix Running Total [{hrs_cat}] (CSV)",
+              data=csv_run,
+              file_name=f"Matrix_Running_Total_{hrs_cat.replace(' ', '_')}.csv",
+              mime="text/csv",
           )
+        with col_cls:
+          if st.button("❌ Tutup Tabel Detail"):
+            st.session_state.selected_hrs_category = None
+            st.rerun()
+      else:
+        st.info(
+            f"Tidak ada data untuk kategori [{hrs_cat}] dengan filter yang"
+            " aktif."
+        )
 
-      st.markdown("---")
+    st.markdown("---")
 
-      cab_counts = run_query(f"""
+    cab_counts = run_query(f"""
                 SELECT Cabang, COUNT(DISTINCT AWB) as total
                 FROM v_inbound
                 {where_sql}
                 GROUP BY Cabang
             """)
 
-      summary_str = (
-          " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join([
-              f"<b>{row.Cabang}</b>: {row.total:,} AWB"
-              for idx, row in cab_counts.iterrows()
-          ])
-          if not cab_counts.empty
-          else "Tidak ada data sesuai filter"
-      )
+    summary_str = (
+        " &nbsp;&nbsp;&bull;&nbsp;&nbsp; ".join([
+            f"<b>{row.Cabang}</b>: {row.total:,} AWB"
+            for idx, row in cab_counts.iterrows()
+        ])
+        if not cab_counts.empty
+        else "Tidak ada data sesuai filter"
+    )
 
-      st.markdown(
-          f"""
+    st.markdown(
+        f"""
             <marquee style="color: #2c3e50; background-color: #e8f4f8; padding: 10px; border-radius: 5px; font-weight: 600; font-size: 15px;">
                 🔄 Last Update: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏢 <b>Total Inbound (Filtered):</b> {summary_str}
             </marquee>
         """,
-          unsafe_allow_html=True,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    st.subheader("📈 1. Grafik Total Inbound Per Tanggal (Tahun 2026)")
+
+    col_gran, col_date = st.columns([1, 1])
+
+    with col_gran:
+      granularity = st.radio(
+          "Pilih Granularitas Waktu:",
+          ["Hari", "Week (Minggu)", "Bulan"],
+          horizontal=True,
+          key="exec_granularity",
       )
 
-      st.markdown("---")
-
-      st.subheader("📈 1. Grafik Total Inbound Per Tanggal (Tahun 2026)")
-
-      col_gran, col_date = st.columns([1, 1])
-
-      with col_gran:
-        granularity = st.radio(
-            "Pilih Granularitas Waktu:",
-            ["Hari", "Week (Minggu)", "Bulan"],
-            horizontal=True,
-            key="exec_granularity",
-        )
-
-      min_max_inbound_2026 = run_query(f"""
+    min_max_inbound_2026 = run_query(f"""
                 SELECT 
                     MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as min_d, 
                     MAX(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as max_d 
@@ -1013,54 +982,51 @@ try:
                 {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
             """)
 
-      inbound_start = (
-          min_max_inbound_2026["min_d"][0]
-          if not min_max_inbound_2026.empty
-          and pd.notnull(min_max_inbound_2026["min_d"][0])
-          else datetime.date(2026, 1, 1)
+    inbound_start = (
+        min_max_inbound_2026["min_d"][0]
+        if not min_max_inbound_2026.empty
+        and pd.notnull(min_max_inbound_2026["min_d"][0])
+        else datetime.date(2026, 1, 1)
+    )
+    inbound_end = (
+        min_max_inbound_2026["max_d"][0]
+        if not min_max_inbound_2026.empty
+        and pd.notnull(min_max_inbound_2026["max_d"][0])
+        else datetime.date(2026, 12, 31)
+    )
+
+    with col_date:
+      inbound_date_range = st.date_input(
+          "📅 Filter Rentang Tanggal (Inbound 2026):",
+          value=(inbound_start, inbound_end),
+          min_value=datetime.date(2026, 1, 1),
+          max_value=datetime.date(2026, 12, 31),
+          key="exec_date_range",
       )
-      inbound_end = (
-          min_max_inbound_2026["max_d"][0]
-          if not min_max_inbound_2026.empty
-          and pd.notnull(min_max_inbound_2026["max_d"][0])
-          else datetime.date(2026, 12, 31)
+
+    inbound_date_clause = ""
+    if isinstance(inbound_date_range, tuple) and len(inbound_date_range) == 2:
+      s_date, e_date = inbound_date_range
+      inbound_date_clause = f"AND CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE) BETWEEN '{s_date}' AND '{e_date}'"
+
+    if granularity == "Hari":
+      date_expr = (
+          "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE"
+          " '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b')"
+      )
+    elif granularity == "Week (Minggu)":
+      date_expr = (
+          "'Week ' || STRFTIME(COALESCE(dt_im, CASE WHEN"
+          " UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END),"
+          " '%W')"
+      )
+    else:
+      date_expr = (
+          "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE"
+          " '%MXG%' THEN dt_hvi ELSE NULL END), '%B')"
       )
 
-      with col_date:
-        inbound_date_range = st.date_input(
-            "📅 Filter Rentang Tanggal (Inbound 2026):",
-            value=(inbound_start, inbound_end),
-            min_value=datetime.date(2026, 1, 1),
-            max_value=datetime.date(2026, 12, 31),
-            key="exec_date_range",
-        )
-
-      inbound_date_clause = ""
-      if (
-          isinstance(inbound_date_range, tuple)
-          and len(inbound_date_range) == 2
-      ):
-        s_date, e_date = inbound_date_range
-        inbound_date_clause = f"AND CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE) BETWEEN '{s_date}' AND '{e_date}'"
-
-      if granularity == "Hari":
-        date_expr = (
-            "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
-            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b')"
-        )
-      elif granularity == "Week (Minggu)":
-        date_expr = (
-            "'Week ' || STRFTIME(COALESCE(dt_im, CASE WHEN"
-            " UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL"
-            " END), '%W')"
-        )
-      else:
-        date_expr = (
-            "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, ''))"
-            " LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%B')"
-        )
-
-      df_inbound_trend = run_query(f"""
+    df_inbound_trend = run_query(f"""
                 SELECT 
                     {date_expr} AS periode,
                     COUNT(DISTINCT AWB) AS total_awb,
@@ -1072,220 +1038,213 @@ try:
                 ORDER BY sort_key ASC
             """)
 
-      if not df_inbound_trend.empty:
-        fig_inbound = go.Figure()
-        fig_inbound.add_trace(
-            go.Scatter(
-                x=df_inbound_trend["periode"],
-                y=df_inbound_trend["total_awb"],
-                mode="lines+markers",
-                fill="tozeroy",
-                line=dict(color="#1f77b4", width=3, shape="spline"),
-                marker=dict(size=6, color="#1f77b4"),
-                fillcolor="rgba(31, 119, 180, 0.3)",
-            )
-        )
-        fig_inbound.update_layout(
-            title=dict(
-                text="<b>TOTAL INBOUND 2026 (FILTERED)</b>",
-                x=0.5,
-                xanchor="center",
-                font=dict(size=18, color="#FFFFFF"),
-            ),
-            xaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                tickfont=dict(color="#CCCCCC"),
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor="rgba(255, 255, 255, 0.1)",
-                gridwidth=1,
-                griddash="dash",
-                zeroline=False,
-                tickfont=dict(color="#CCCCCC"),
-            ),
-            plot_bgcolor="rgba(15, 32, 67, 0.8)",
-            paper_bgcolor="rgba(0, 0, 0, 0)",
-            margin=dict(l=40, r=40, t=60, b=40),
-            height=350,
-        )
-        st.plotly_chart(fig_inbound, use_container_width=True)
-      else:
-        st.info(
-            "Tidak ada data Inbound untuk filter dan rentang tanggal tersebut."
-        )
+    if not df_inbound_trend.empty:
+      fig_inbound = go.Figure()
+      fig_inbound.add_trace(
+          go.Scatter(
+              x=df_inbound_trend["periode"],
+              y=df_inbound_trend["total_awb"],
+              mode="lines+markers",
+              fill="tozeroy",
+              line=dict(color="#1f77b4", width=3, shape="spline"),
+              marker=dict(size=6, color="#1f77b4"),
+              fillcolor="rgba(31, 119, 180, 0.3)",
+          )
+      )
+      fig_inbound.update_layout(
+          title=dict(
+              text="<b>TOTAL INBOUND 2026 (FILTERED)</b>",
+              x=0.5,
+              xanchor="center",
+              font=dict(size=18, color="#FFFFFF"),
+          ),
+          xaxis=dict(
+              showgrid=False,
+              zeroline=False,
+              tickfont=dict(color="#CCCCCC"),
+          ),
+          yaxis=dict(
+              showgrid=True,
+              gridcolor="rgba(255, 255, 255, 0.1)",
+              gridwidth=1,
+              griddash="dash",
+              zeroline=False,
+              tickfont=dict(color="#CCCCCC"),
+          ),
+          plot_bgcolor="rgba(15, 32, 67, 0.8)",
+          paper_bgcolor="rgba(0, 0, 0, 0)",
+          margin=dict(l=40, r=40, t=60, b=40),
+          height=350,
+      )
+      st.plotly_chart(fig_inbound, use_container_width=True)
+    else:
+      st.info(
+          "Tidak ada data Inbound untuk filter dan rentang tanggal tersebut."
+      )
 
-      st.markdown("---")
+    st.markdown("---")
 
-      def render_plotly_table_matrix(
-          df_raw, title_text, csv_filename, download_label
-      ):
-        if df_raw.empty:
-          st.info("Tidak ada data.")
-          return
+    def render_plotly_table_matrix(
+        df_raw, title_text, csv_filename, download_label
+    ):
+      if df_raw.empty:
+        st.info("Tidak ada data.")
+        return
 
-        pivot = df_raw.pivot(
-            index="Cabang", columns="aging_group", values="total_awb"
-        ).fillna(0)
-        for col in AGING_ORDER:
-          if col not in pivot.columns:
-            pivot[col] = 0
+      pivot = df_raw.pivot(
+          index="Cabang", columns="aging_group", values="total_awb"
+      ).fillna(0)
+      for col in AGING_ORDER:
+        if col not in pivot.columns:
+          pivot[col] = 0
 
-        pivot = pivot[AGING_ORDER]
-        pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
-        pivot = pivot.sort_values(by="Grand Total", ascending=False)
+      pivot = pivot[AGING_ORDER]
+      pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
+      pivot = pivot.sort_values(by="Grand Total", ascending=False)
 
-        grand_total_row = pivot.sum(axis=0)
-        grand_total_row.name = "Grand Total"
+      grand_total_row = pivot.sum(axis=0)
+      grand_total_row.name = "Grand Total"
 
-        pivot_with_total = pd.concat([pivot, pd.DataFrame([grand_total_row])])
-        pivot_with_total = pivot_with_total.reset_index().rename(
-            columns={"index": "Cabang"}
-        )
+      pivot_with_total = pd.concat([pivot, pd.DataFrame([grand_total_row])])
+      pivot_with_total = pivot_with_total.reset_index().rename(
+          columns={"index": "Cabang"}
+      )
 
-        headers = list(pivot_with_total.columns)
-        cell_values = []
-        for col in headers:
-          if col == "Cabang":
-            cell_values.append(pivot_with_total[col].astype(str).tolist())
+      headers = list(pivot_with_total.columns)
+      cell_values = []
+      for col in headers:
+        if col == "Cabang":
+          cell_values.append(pivot_with_total[col].astype(str).tolist())
+        else:
+          cell_values.append(
+              [f"{int(val):,}" for val in pivot_with_total[col].tolist()]
+          )
+
+      cell_colors = []
+      n_rows = len(pivot_with_total)
+
+      for col in headers:
+        col_color_list = []
+        for row_idx in range(n_rows):
+          if row_idx == n_rows - 1:
+            col_color_list.append("#222222")
+          elif col == "Cabang" or col == "Grand Total":
+            col_color_list.append("#2a2a2a")
           else:
-            cell_values.append([
-                f"{int(val):,}" for val in pivot_with_total[col].tolist()
-            ])
-
-        cell_colors = []
-        n_rows = len(pivot_with_total)
-
-        for col in headers:
-          col_color_list = []
-          for row_idx in range(n_rows):
-            if row_idx == n_rows - 1:
-              col_color_list.append("#222222")
-            elif col == "Cabang" or col == "Grand Total":
-              col_color_list.append("#2a2a2a")
-            else:
-              val = pivot_with_total[col].iloc[row_idx]
-              if col == "H+0":
-                col_color_list.append("#28a745" if val > 0 else "#1e1e1e")
-              elif col in ["H+1", "H+2"]:
-                col_color_list.append("#ffc107" if val > 0 else "#1e1e1e")
-              elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
-                col_color_list.append("#dc3545" if val > 0 else "#1e1e1e")
-              else:
-                col_color_list.append("#1e1e1e")
-          cell_colors.append(col_color_list)
-
-        font_colors = []
-        for col in headers:
-          col_font_list = []
-          for row_idx in range(n_rows):
-            if row_idx == n_rows - 1:
-              col_font_list.append("#ffffff")
+            val = pivot_with_total[col].iloc[row_idx]
+            if col == "H+0":
+              col_color_list.append("#28a745" if val > 0 else "#1e1e1e")
             elif col in ["H+1", "H+2"]:
-              val = pivot_with_total[col].iloc[row_idx]
-              col_font_list.append("#000000" if val > 0 else "#ffffff")
+              col_color_list.append("#ffc107" if val > 0 else "#1e1e1e")
+            elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
+              col_color_list.append("#dc3545" if val > 0 else "#1e1e1e")
             else:
-              col_font_list.append("#ffffff")
-          font_colors.append(col_font_list)
+              col_color_list.append("#1e1e1e")
+        cell_colors.append(col_color_list)
 
-        fig_table = go.Figure(
-            data=[
-                go.Table(
-                    header=dict(
-                        values=[f"<b>{h}</b>" for h in headers],
-                        fill_color="#333333",
-                        align="center",
-                        font=dict(color="white", size=13),
-                        height=32,
-                    ),
-                    cells=dict(
-                        values=cell_values,
-                        fill_color=cell_colors,
-                        align=[
-                            "left" if h == "Cabang" else "center"
-                            for h in headers
-                        ],
-                        font=dict(color=font_colors, size=12),
-                        height=28,
-                    ),
-                )
-            ]
-        )
+      font_colors = []
+      for col in headers:
+        col_font_list = []
+        for row_idx in range(n_rows):
+          if row_idx == n_rows - 1:
+            col_font_list.append("#ffffff")
+          elif col in ["H+1", "H+2"]:
+            val = pivot_with_total[col].iloc[row_idx]
+            col_font_list.append("#000000" if val > 0 else "#ffffff")
+          else:
+            col_font_list.append("#ffffff")
+        font_colors.append(col_font_list)
 
-        fig_table.update_layout(
-            title=dict(
-                text=f"<b>{title_text}</b>",
-                x=0,
-                xanchor="left",
-                font=dict(size=16, color="#FFFFFF"),
-            ),
-            margin=dict(l=10, r=10, t=50, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=320,
-        )
+      fig_table = go.Figure(
+          data=[
+              go.Table(
+                  header=dict(
+                      values=[f"<b>{h}</b>" for h in headers],
+                      fill_color="#333333",
+                      align="center",
+                      font=dict(color="white", size=13),
+                      height=32,
+                  ),
+                  cells=dict(
+                      values=cell_values,
+                      fill_color=cell_colors,
+                      align=[
+                          "left" if h == "Cabang" else "center" for h in headers
+                      ],
+                      font=dict(color=font_colors, size=12),
+                      height=28,
+                  ),
+              )
+          ]
+      )
 
-        st.plotly_chart(fig_table, use_container_width=True)
+      fig_table.update_layout(
+          title=dict(
+              text=f"<b>{title_text}</b>",
+              x=0,
+              xanchor="left",
+              font=dict(size=16, color="#FFFFFF"),
+          ),
+          margin=dict(l=10, r=10, t=50, b=10),
+          paper_bgcolor="rgba(0,0,0,0)",
+          plot_bgcolor="rgba(0,0,0,0)",
+          height=320,
+      )
 
-        csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label=download_label,
-            data=csv_data,
-            file_name=csv_filename,
-            mime="text/csv",
-        )
+      st.plotly_chart(fig_table, use_container_width=True)
 
-      df_unrun = run_query(f"""
+      csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
+      st.download_button(
+          label=download_label,
+          data=csv_data,
+          file_name=csv_filename,
+          mime="text/csv",
+      )
+
+    df_unrun = run_query(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM v_inbound
                 {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
             """)
-      render_plotly_table_matrix(
-          df_unrun,
-          "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)",
-          "Matrix_UnRunsheet_Cabang.csv",
-          "📥 Download Data Matrix UnRunsheet (CSV)",
-      )
+    render_plotly_table_matrix(
+        df_unrun,
+        "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)",
+        "Matrix_UnRunsheet_Cabang.csv",
+        "📥 Download Data Matrix UnRunsheet (CSV)",
+    )
 
-      st.markdown("---")
+    st.markdown("---")
 
-      df_succ = run_query(f"""
+    df_succ = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
             """)
-      render_plotly_table_matrix(
-          df_succ,
-          "📊 3. Matrix Infografis Success UnHRS Per Cabang",
-          "Matrix_Success_UnHRS_Cabang.csv",
-          "📥 Download Data Matrix Success UnHRS (CSV)",
-      )
+    render_plotly_table_matrix(
+        df_succ,
+        "📊 3. Matrix Infografis Success UnHRS Per Cabang",
+        "Matrix_Success_UnHRS_Cabang.csv",
+        "📥 Download Data Matrix Success UnHRS (CSV)",
+    )
 
-      st.markdown("---")
+    st.markdown("---")
 
-      df_undel = run_query(f"""
+    df_undel = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
                 {where_sql} AND Status_Shipment = 'UNDELIVERY'
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
             """)
-      render_plotly_table_matrix(
-          df_undel,
-          "📊 4. Matrix Infografis Undel UnHRS Per Cabang",
-          "Matrix_Undel_UnHRS_Cabang.csv",
-          "📥 Download Data Matrix Undel UnHRS (CSV)",
-      )
-
-    else:
-      st.warning(
-          "🔒 Halaman Summary Exec Terkunci. Masukkan password **MXG125** pada"
-          " sidebar di sebelah kiri untuk membuka laporan."
-      )
+    render_plotly_table_matrix(
+        df_undel,
+        "📊 4. Matrix Infografis Undel UnHRS Per Cabang",
+        "Matrix_Undel_UnHRS_Cabang.csv",
+        "📥 Download Data Matrix Undel UnHRS (CSV)",
+    )
 
 except Exception as main_err:
   st.error("⚠️ Terjadi masalah saat mengolah data dashboard:")
