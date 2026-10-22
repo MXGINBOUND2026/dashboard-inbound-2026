@@ -617,7 +617,7 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC (TERHUBUNG KE FILTER MINGGU)
+  # TAB 2: SUMMARY EXEC (DENGAN OPSI ALL WEEK)
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
@@ -632,52 +632,91 @@ try:
                 ORDER BY wk_num DESC
             """)
 
-      week_options = (
+      week_list = (
           avail_weeks_df["wk_num"].dropna().astype(int).tolist()
           if not avail_weeks_df.empty
           else [43]
       )
-      if not week_options:
-        week_options = [43]
+
+      # DITAMBAHKAN OPSI "All Week" DI PALING ATAS
+      week_options = ["All Week"] + week_list
 
       col_w_sel, _ = st.columns([1, 2])
       with col_w_sel:
-        selected_week = st.selectbox(
+        selected_week_opt = st.selectbox(
             "📅 Pilih Minggu Analysis (Week):",
             options=week_options,
             index=0,
             key="exec_selected_week",
         )
 
-      prev_week_val = selected_week - 1 if selected_week > 0 else 0
+      # PENANGANAN KLAUSA SQL UNTUK ALL WEEK ATALAH PER MINGGU
+      if selected_week_opt == "All Week":
+        week_clause = "AND pod_week_num IS NOT NULL"
+        prev_week_val = None
+        caption_text = "📌 Perbandingan Performansi WUS: **All Weeks Total**"
+      else:
+        selected_week = int(selected_week_opt)
+        prev_week_val = selected_week - 1 if selected_week > 0 else 0
+        week_clause = f"AND pod_week_num = {selected_week}"
+        caption_text = (
+            f"📌 Perbandingan Performansi WUS: **Week {selected_week}** vs **Week"
+            f" {prev_week_val}**"
+        )
 
-      kpi_batch_df = run_query(f"""
-                SELECT 
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_vol,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} THEN AWB END) AS succ_ab_curr_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_curr_tgt,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} THEN AWB END) AS succ_ab_prev_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_prev_tgt,
+      # QUERY METRIKS KPI
+      if selected_week_opt == "All Week":
+        kpi_batch_df = run_query(f"""
+                    SELECT 
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_curr_tgt,
+                        0 AS succ_ab_prev_tot, 0 AS succ_ab_prev_tgt,
 
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_vol,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} THEN AWB END) AS succ_c_curr_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_curr_tgt,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS succ_c_prev_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_prev_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_curr_tgt,
+                        0 AS succ_c_prev_tot, 0 AS succ_c_prev_tgt,
 
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_vol,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} THEN AWB END) AS undel_ab_curr_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_curr_tgt,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_ab_prev_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_prev_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_curr_tgt,
+                        0 AS undel_ab_prev_tot, 0 AS undel_ab_prev_tgt,
 
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS undel_c_vol,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} THEN AWB END) AS undel_c_curr_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_curr_tgt,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_c_prev_tot,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_prev_tgt
-                FROM v_inbound {where_sql} AND pod_week_num = {selected_week}
-            """)
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS undel_c_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS undel_c_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_curr_tgt,
+                        0 AS undel_c_prev_tot, 0 AS undel_c_prev_tgt
+                    FROM v_inbound {where_sql} AND pod_week_num IS NOT NULL
+                """)
+      else:
+        kpi_batch_df = run_query(f"""
+                    SELECT 
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} THEN AWB END) AS succ_ab_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_curr_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} THEN AWB END) AS succ_ab_prev_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_prev_tgt,
+
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} THEN AWB END) AS succ_c_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_curr_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS succ_c_prev_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_prev_tgt,
+
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} THEN AWB END) AS undel_ab_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_curr_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_ab_prev_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS undel_ab_prev_tgt,
+
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS undel_c_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} THEN AWB END) AS undel_c_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {selected_week} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_curr_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} THEN AWB END) AS undel_c_prev_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) = 'C' AND pod_week_num = {prev_week_val} AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS undel_c_prev_tgt
+                    FROM v_inbound {where_sql} {week_clause}
+                """)
 
     if not kpi_batch_df.empty:
       r = kpi_batch_df.iloc[0]
@@ -723,10 +762,7 @@ try:
       succ_ab_pct = succ_c_pct = undel_ab_pct = undel_c_pct = 0.0
       succ_ab_wow = succ_c_wow = undel_ab_wow = undel_c_wow = 0.0
 
-    st.caption(
-        f"📌 Perbandingan Performansi WUS: **Week {selected_week}** vs **Week"
-        f" {prev_week_val}**"
-    )
+    st.caption(caption_text)
 
     def get_status_alert_badge(title, total_vol, pct_val, wow_val):
       status_icon = "✅" if pct_val >= 95.0 else "🚨"
@@ -737,13 +773,19 @@ try:
       wow_color = "#28a745" if wow_val >= 0 else "#dc3545"
       wow_sign = "+" if wow_val >= 0 else ""
 
+      wow_display = (
+          f"<span style='color: {wow_color}; font-weight: bold;'>({wow_sign}{wow_val:.1f}% WoW)</span>"
+          if selected_week_opt != "All Week"
+          else ""
+      )
+
       return f"""
         <div style="background-color: #1e1e1e; padding: 14px; border-radius: 8px; border-left: 5px solid {badge_color}; margin-bottom: 10px;">
             <div style="font-size: 13px; color: #aaaaaa; font-weight: 600;">{status_icon} {title}</div>
             <div style="font-size: 11px; color: {badge_color}; font-weight: bold; margin-top: 2px;">{status_text}</div>
             <div style="font-size: 26px; font-weight: bold; color: #ffffff; margin: 4px 0;">{total_vol:,} <span style="font-size: 14px; font-weight: normal; color: #aaaaaa;">AWB</span></div>
             <div style="font-size: 13px; color: #cccccc; margin-top: 4px;">
-                Capaian Target: <b>{pct_val:.1f}%</b> <span style="color: {wow_color}; font-weight: bold;">({wow_sign}{wow_val:.1f}% WoW)</span>
+                Capaian Target: <b>{pct_val:.1f}%</b> {wow_display}
             </div>
         </div>
         """
@@ -852,7 +894,6 @@ try:
         hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
         hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
 
-      # TERHUBUNG DENGAN FILTER MINGGU (pod_week_num)
       df_running_hrs = run_query(f"""
                     WITH base AS (
                         SELECT 
@@ -868,7 +909,7 @@ try:
                             COUNT(DISTINCT CASE WHEN hrs_aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7') THEN AWB END) as h7,
                             COUNT(DISTINCT CASE WHEN hrs_aging_group IS NOT NULL AND hrs_aging_group != '-' THEN AWB END) as h_gt
                         FROM v_inbound {where_sql}
-                        AND pod_week_num = {selected_week}
+                        {week_clause}
                         AND {hrs_status_sql}
                         AND {hrs_zona_sql}
                         GROUP BY LAST_LOCATION
@@ -1198,11 +1239,10 @@ try:
           mime="text/csv",
       )
 
-    # TERHUBUNG DENGAN FILTER MINGGU (pod_week_num) UNTUK 3 TABEL MATRIX BAWAH
     df_unrun = run_query(f"""
                 SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
                 FROM v_inbound
-                {where_sql} AND pod_week_num = {selected_week} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                {where_sql} {week_clause} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
                 GROUP BY Cabang, aging_group
             """)
     render_plotly_table_matrix(
@@ -1217,7 +1257,7 @@ try:
     df_succ = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
-                {where_sql} AND pod_week_num = {selected_week} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                {where_sql} {week_clause} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
             """)
@@ -1233,7 +1273,7 @@ try:
     df_undel = run_query(f"""
                 SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                 FROM v_inbound
-                {where_sql} AND pod_week_num = {selected_week} AND Status_Shipment = 'UNDELIVERY'
+                {where_sql} {week_clause} AND Status_Shipment = 'UNDELIVERY'
                   AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                 GROUP BY Cabang, wus_aging_group
             """)
