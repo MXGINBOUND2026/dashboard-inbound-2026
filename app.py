@@ -101,7 +101,7 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 
 
 # =========================================================
-# CACHED QUERY FUNCTIONS (SOLusi Utama Anti-Lag / Throttling)
+# CACHED QUERY FUNCTIONS
 # =========================================================
 @st.cache_data(ttl=1800)
 def run_query(sql_query):
@@ -694,12 +694,44 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
+      # ---------------------------------------------------------
+      # FITUR TERBARU: FILTER DROPDOWN WEEK PADA EXECUTIVE SUMMARY
+      # ---------------------------------------------------------
+      avail_weeks_df = run_query(f"""
+                SELECT DISTINCT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
+                FROM v_inbound {where_sql}
+                AND TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-'
+                ORDER BY wk_num DESC
+            """)
+
+      week_options = (
+          avail_weeks_df["wk_num"].dropna().astype(int).tolist()
+          if not avail_weeks_df.empty
+          else [43]
+      )
+      if not week_options:
+        week_options = [43]
+
+      col_w_sel, _ = st.columns([1, 2])
+      with col_w_sel:
+        selected_week = st.selectbox(
+            "📅 Pilih Minggu Analysis (Week):",
+            options=week_options,
+            index=0,
+            key="exec_selected_week",
+        )
+
+      prev_week_val = selected_week - 1 if selected_week > 0 else 0
+
       def get_kpi_metrics(
           status_filter_sql,
           unhrs_filter_sql,
           zona_filter_sql,
           target_aging_condition_sql,
+          target_week,
+          comparison_week,
       ):
+        # Total UnHRS All Aging
         tot_all_df = run_query(f"""
                     SELECT COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
@@ -707,26 +739,9 @@ try:
                     AND {unhrs_filter_sql}
                     AND {zona_filter_sql}
                 """)
-
         tot_all_value = tot_all_df["total_awb"][0] or 0
 
-        week_info = run_query(f"""
-                    SELECT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
-                    FROM v_inbound {where_sql}
-                    AND {status_filter_sql}
-                    AND {zona_filter_sql}
-                    AND TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-'
-                    ORDER BY TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M') DESC
-                    LIMIT 1
-                """)
-
-        current_week = (
-            week_info["wk_num"][0]
-            if not week_info.empty and pd.notnull(week_info["wk_num"][0])
-            else 43
-        )
-        prev_week = current_week - 1 if current_week > 0 else 0
-
+        # Persentase Minggu Pilihan
         curr_df = run_query(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -734,13 +749,14 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {current_week}
+                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {target_week}
                 """)
 
         curr_tot = curr_df["total_kiriman"][0] or 0
         curr_tgt = curr_df["total_hrs_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
+        # Persentase Minggu Sebelumnya
         prev_df = run_query(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -748,7 +764,7 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {prev_week}
+                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {comparison_week}
                 """)
 
         prev_tot = prev_df["total_kiriman"][0] or 0
@@ -756,46 +772,58 @@ try:
         prev_pct = (prev_tgt / prev_tot * 100.0) if prev_tot > 0 else 0.0
 
         wow_diff = curr_pct - prev_pct
-        return tot_all_value, curr_pct, wow_diff, current_week, prev_week
+        return tot_all_value, curr_pct, wow_diff
 
-      succ_ab_vol, succ_ab_pct, succ_ab_wow, cur_w, prv_w = get_kpi_metrics(
+      # Perhitungan 4 Card Metrics
+      succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
           status_filter_sql=(
               "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
           ),
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_condition_sql="hrs_aging_group = 'H+0'",
+          target_week=selected_week,
+          comparison_week=prev_week_val,
       )
 
-      succ_c_vol, succ_c_pct, succ_c_wow, _, _ = get_kpi_metrics(
+      succ_c_vol, succ_c_pct, succ_c_wow = get_kpi_metrics(
           status_filter_sql=(
               "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
           ),
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_condition_sql="hrs_aging_group IN ('H+0', 'H+1')",
+          target_week=selected_week,
+          comparison_week=prev_week_val,
       )
 
-      undel_ab_vol, undel_ab_pct, undel_ab_wow, _, _ = get_kpi_metrics(
+      undel_ab_vol, undel_ab_pct, undel_ab_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY'",
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) IN ('A', 'B')",
           target_aging_condition_sql="hrs_aging_group = 'H+0'",
+          target_week=selected_week,
+          comparison_week=prev_week_val,
       )
 
-      undel_c_vol, undel_c_pct, undel_c_wow, _, _ = get_kpi_metrics(
+      undel_c_vol, undel_c_pct, undel_c_wow = get_kpi_metrics(
           status_filter_sql="Status_Shipment = 'UNDELIVERY'",
           unhrs_filter_sql="(HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)",
           zona_filter_sql="UPPER(TRIM(Zona)) = 'C'",
           target_aging_condition_sql="hrs_aging_group IN ('H+0', 'H+1')",
+          target_week=selected_week,
+          comparison_week=prev_week_val,
       )
 
       st.caption(
-          f"📌 Perbandingan Performansi WUS: **Week {cur_w}** vs **Week"
-          f" {prv_w}**"
+          f"📌 Perbandingan Performansi WUS: **Week {selected_week}** vs **Week"
+          f" {prev_week_val}**"
       )
 
-      def get_status_alert_badge(title, pct_val, wow_val):
+      # ---------------------------------------------------------
+      # BADGE KPI CARD DENGAN TOTAL VOLUME + CAPAIAN PERSEN
+      # ---------------------------------------------------------
+      def get_status_alert_badge(title, total_vol, pct_val, wow_val):
         status_icon = "✅" if pct_val >= 95.0 else "🚨"
         status_text = (
             "Target Achieved" if pct_val >= 95.0 else "Below Target (<95%)"
@@ -806,12 +834,12 @@ try:
         wow_sign = "+" if wow_val >= 0 else ""
 
         return f"""
-        <div style="background-color: #1e1e1e; padding: 12px; border-radius: 8px; border-left: 5px solid {badge_color}; margin-bottom: 10px;">
+        <div style="background-color: #1e1e1e; padding: 14px; border-radius: 8px; border-left: 5px solid {badge_color}; margin-bottom: 10px;">
             <div style="font-size: 13px; color: #aaaaaa; font-weight: 600;">{status_icon} {title}</div>
             <div style="font-size: 11px; color: {badge_color}; font-weight: bold; margin-top: 2px;">{status_text}</div>
-            <div style="font-size: 24px; font-weight: bold; color: #ffffff; margin: 4px 0;">{pct_val:.1f}%</div>
-            <div style="font-size: 12px; color: #cccccc;">
-                Capaian <span style="color: {wow_color}; font-weight: bold;">({wow_sign}{wow_val:.1f}% WoW)</span>
+            <div style="font-size: 26px; font-weight: bold; color: #ffffff; margin: 4px 0;">{total_vol:,} <span style="font-size: 14px; font-weight: normal; color: #aaaaaa;">AWB</span></div>
+            <div style="font-size: 13px; color: #cccccc; margin-top: 4px;">
+                Capaian Target: <b>{pct_val:.1f}%</b> <span style="color: {wow_color}; font-weight: bold;">({wow_sign}{wow_val:.1f}% WoW)</span>
             </div>
         </div>
         """
@@ -820,41 +848,52 @@ try:
       with kc1:
         st.markdown(
             get_status_alert_badge(
-                "Success UnHRS (Zona A&B | H+0)", succ_ab_pct, succ_ab_wow
+                "Success UnHRS (Zona A&B | H+0)",
+                succ_ab_vol,
+                succ_ab_pct,
+                succ_ab_wow,
             ),
             unsafe_allow_html=True,
         )
-        st.caption(f"📦 Total UnHRS: **{succ_ab_vol:,} AWB**")
 
       with kc2:
         st.markdown(
             get_status_alert_badge(
-                "Success UnHRS (Zona C | ≤ H+1)", succ_c_pct, succ_c_wow
+                "Success UnHRS (Zona C | ≤ H+1)",
+                succ_c_vol,
+                succ_c_pct,
+                succ_c_wow,
             ),
             unsafe_allow_html=True,
         )
-        st.caption(f"📦 Total UnHRS: **{succ_c_vol:,} AWB**")
 
       with kc3:
         st.markdown(
             get_status_alert_badge(
-                "Undel UnHRS (Zona A&B | H+0)", undel_ab_pct, undel_ab_wow
+                "Undel UnHRS (Zona A&B | H+0)",
+                undel_ab_vol,
+                undel_ab_pct,
+                undel_ab_wow,
             ),
             unsafe_allow_html=True,
         )
-        st.caption(f"📦 Total UnHRS: **{undel_ab_vol:,} AWB**")
 
       with kc4:
         st.markdown(
             get_status_alert_badge(
-                "Undel UnHRS (Zona C | ≤ H+1)", undel_c_pct, undel_c_wow
+                "Undel UnHRS (Zona C | ≤ H+1)",
+                undel_c_vol,
+                undel_c_pct,
+                undel_c_wow,
             ),
             unsafe_allow_html=True,
         )
-        st.caption(f"📦 Total UnHRS: **{undel_c_vol:,} AWB**")
 
       st.markdown("---")
 
+      # =========================================================
+      # DETAIL CAPAIAN RUNNING TOTAL HRS
+      # =========================================================
       if "selected_hrs_category" not in st.session_state:
         st.session_state.selected_hrs_category = None
 
