@@ -99,7 +99,9 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
     st.stop()
 
 try:
+  # Batasi memori DuckDB max 512MB
   conn = duckdb.connect()
+  conn.execute("SET memory_limit='512MB';")
 
   parquet_columns = conn.execute(
       f"DESCRIBE SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')"
@@ -802,7 +804,6 @@ try:
           f" {prv_w}**"
       )
 
-      # Kriteria Alert: Di bawah 95% = Merah 🚨, Di atas/sama dengan 95% = Hijau ✅
       def get_status_alert_badge(title, pct_val, wow_val):
         status_icon = "✅" if pct_val >= 95.0 else "🚨"
         status_text = (
@@ -824,7 +825,6 @@ try:
         </div>
         """
 
-      # Tampilan 4 Card Header kustom
       kc1, kc2, kc3, kc4 = st.columns(4)
       with kc1:
         st.markdown(
@@ -865,7 +865,7 @@ try:
       st.markdown("---")
 
       # =========================================================
-      # FITUR BARU: TOMBOL DETAIL CAPAIAN RUNNING TOTAL HRS
+      # DETAIL CAPAIAN RUNNING TOTAL HRS (SANGAT RINGAN RAM)
       # =========================================================
       if "selected_hrs_category" not in st.session_state:
         st.session_state.selected_hrs_category = None
@@ -927,7 +927,6 @@ try:
           hrs_status_sql = "Status_Shipment = 'UNDELIVERY'"
           hrs_zona_sql = "UPPER(TRIM(Zona)) = 'C'"
 
-        # Query Running Total Persentase
         df_running_hrs = conn.execute(f"""
                     WITH base AS (
                         SELECT 
@@ -963,19 +962,6 @@ try:
                 """).fetchdf()
 
         if not df_running_hrs.empty:
-
-          def highlight_running_pct(val):
-            if pd.isna(val) or val == 0:
-              return ""
-            if val >= 95.0:
-              return "background-color: #28a745; color: white; font-weight: bold;"
-            elif val >= 80.0:
-              return (
-                  "background-color: #ffc107; color: black; font-weight: bold;"
-              )
-            else:
-              return "background-color: #dc3545; color: white; font-weight: bold;"
-
           pct_cols = [
               "H+0",
               "H+1",
@@ -987,11 +973,20 @@ try:
               "H+7",
               ">H+7",
           ]
-          styled_df = df_running_hrs.style.applymap(
-              highlight_running_pct, subset=pct_cols
-          ).format({col: "{:.2f}%" for col in pct_cols})
 
-          st.dataframe(styled_df, use_container_width=True)
+          # Menggunakan Streamlit Column Configuration (Tanpa Beban Pandas Styler CSS)
+          column_config = {
+              c: st.column_config.NumberColumn(
+                  label=c, format="%.2f%%", min_value=0, max_value=100
+              )
+              for c in pct_cols
+          }
+
+          st.dataframe(
+              df_running_hrs,
+              column_config=column_config,
+              use_container_width=True,
+          )
 
           col_dl, col_cls = st.columns([3, 1])
           with col_dl:
