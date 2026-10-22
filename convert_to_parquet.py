@@ -463,7 +463,6 @@ query_duckdb = f"""
                 ELSE '-'
             END AS hrs_aging_group,
 
-            -- OPTIMASI BARU: Pre-calculate Week Number dari TGL_UPDATE_STATUS_POD
             CASE 
                 WHEN w.dt_update_pod IS NOT NULL THEN EXTRACT(WEEK FROM w.dt_update_pod)
                 ELSE NULL
