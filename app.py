@@ -101,71 +101,16 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 
 
 # =========================================================
-# CACHED QUERY FUNCTIONS
+# ULTRA LIGHTWEIGHT CACHED QUERY FUNCTION
 # =========================================================
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=3600)
 def run_query(sql_query):
   con = duckdb.connect()
-  con.execute("SET memory_limit='512MB';")
-
-  parquet_columns = con.execute(
-      f"DESCRIBE SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')"
-  ).fetchdf()["column_name"].tolist()
-
-  wus_col_expr = (
-      "WUS_DATE"
-      if "WUS_DATE" in parquet_columns
-      else "CAST(NULL AS VARCHAR) AS WUS_DATE"
-  )
-  bil_col_expr = (
-      "BILNOTE_AMOUNT"
-      if "BILNOTE_AMOUNT" in parquet_columns
-      else "CAST(NULL AS DOUBLE) AS BILNOTE_AMOUNT"
-  )
-  courier_col_expr = (
-      "RUNSHEET_COURIER_NAME"
-      if "RUNSHEET_COURIER_NAME" in parquet_columns
-      else "CAST(NULL AS VARCHAR) AS RUNSHEET_COURIER_NAME"
-  )
-  tgl_rec_col_expr = (
-      "TGL_RECEIVED"
-      if "TGL_RECEIVED" in parquet_columns
-      else "CAST(NULL AS VARCHAR) AS TGL_RECEIVED"
-  )
-  hrs_aging_col_expr = (
-      "hrs_aging_group"
-      if "hrs_aging_group" in parquet_columns
-      else "CAST('-' AS VARCHAR) AS hrs_aging_group"
-  )
-  coding_col_expr = (
-      """
-        CASE 
-            WHEN CODING IS NULL OR CAST(CODING AS VARCHAR) = '' OR CAST(CODING AS VARCHAR) = '-' THEN '-'
-            WHEN UPPER(CAST(CODING AS VARCHAR)) LIKE 'D%' THEN UPPER(CAST(CODING AS VARCHAR))
-            WHEN TRY_CAST(CODING AS INTEGER) IS NOT NULL THEN 'D' || LPAD(CAST(CODING AS VARCHAR), 2, '0')
-            ELSE CAST(CODING AS VARCHAR)
-        END AS CODING
-    """
-      if "CODING" in parquet_columns
-      else "CAST('-' AS VARCHAR) AS CODING"
-  )
+  con.execute("SET memory_limit='256MB';")
 
   con.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
-        SELECT 
-            *,
-            {wus_col_expr},
-            {bil_col_expr},
-            {courier_col_expr},
-            {tgl_rec_col_expr},
-            {coding_col_expr},
-            {hrs_aging_col_expr},
-            CASE 
-                WHEN BILNOTE_AMOUNT IS NOT NULL AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '' AND CAST(BILNOTE_AMOUNT AS VARCHAR) != '0' 
-                THEN 'COD' 
-                ELSE 'Non COD' 
-            END AS payment_type
-        FROM read_parquet('{LOCAL_PARQUET_PATH}')
+        SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')
     """)
 
   df_res = con.execute(sql_query).fetchdf()
@@ -686,7 +631,7 @@ try:
         st.info("Tidak ada data UnInbound.")
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC (KPI & WUS vs POD AGING PERFORMANCE)
+  # TAB 2: SUMMARY EXEC
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
@@ -694,13 +639,10 @@ try:
           "📊 Executive Summary & Performance Analytics (WUS vs POD Validation)"
       )
 
-      # ---------------------------------------------------------
-      # FITUR TERBARU: FILTER DROPDOWN WEEK PADA EXECUTIVE SUMMARY
-      # ---------------------------------------------------------
       avail_weeks_df = run_query(f"""
-                SELECT DISTINCT WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) as wk_num
+                SELECT DISTINCT pod_week_num as wk_num
                 FROM v_inbound {where_sql}
-                AND TGL_UPDATE_STATUS_POD IS NOT NULL AND TGL_UPDATE_STATUS_POD != '-'
+                WHERE pod_week_num IS NOT NULL
                 ORDER BY wk_num DESC
             """)
 
@@ -731,7 +673,6 @@ try:
           target_week,
           comparison_week,
       ):
-        # Total UnHRS All Aging
         tot_all_df = run_query(f"""
                     SELECT COUNT(DISTINCT AWB) as total_awb
                     FROM v_inbound {where_sql}
@@ -741,7 +682,6 @@ try:
                 """)
         tot_all_value = tot_all_df["total_awb"][0] or 0
 
-        # Persentase Minggu Pilihan
         curr_df = run_query(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -749,14 +689,13 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {target_week}
+                    AND pod_week_num = {target_week}
                 """)
 
         curr_tot = curr_df["total_kiriman"][0] or 0
         curr_tgt = curr_df["total_hrs_target"][0] or 0
         curr_pct = (curr_tgt / curr_tot * 100.0) if curr_tot > 0 else 0.0
 
-        # Persentase Minggu Sebelumnya
         prev_df = run_query(f"""
                     SELECT 
                         COUNT(DISTINCT AWB) as total_kiriman,
@@ -764,7 +703,7 @@ try:
                     FROM v_inbound {where_sql}
                     AND {status_filter_sql}
                     AND {zona_filter_sql}
-                    AND WEEK(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M')) = {comparison_week}
+                    AND pod_week_num = {comparison_week}
                 """)
 
         prev_tot = prev_df["total_kiriman"][0] or 0
@@ -774,7 +713,6 @@ try:
         wow_diff = curr_pct - prev_pct
         return tot_all_value, curr_pct, wow_diff
 
-      # Perhitungan 4 Card Metrics
       succ_ab_vol, succ_ab_pct, succ_ab_wow = get_kpi_metrics(
           status_filter_sql=(
               "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')"
@@ -820,9 +758,6 @@ try:
           f" {prev_week_val}**"
       )
 
-      # ---------------------------------------------------------
-      # BADGE KPI CARD DENGAN TOTAL VOLUME + CAPAIAN PERSEN
-      # ---------------------------------------------------------
       def get_status_alert_badge(title, total_vol, pct_val, wow_val):
         status_icon = "✅" if pct_val >= 95.0 else "🚨"
         status_text = (
@@ -891,9 +826,6 @@ try:
 
       st.markdown("---")
 
-      # =========================================================
-      # DETAIL CAPAIAN RUNNING TOTAL HRS
-      # =========================================================
       if "selected_hrs_category" not in st.session_state:
         st.session_state.selected_hrs_category = None
 
