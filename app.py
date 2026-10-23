@@ -373,6 +373,8 @@ try:
         st.session_state.active_view = "UnRunsheet"
       if "active_card_filter" not in st.session_state:
         st.session_state.active_card_filter = None
+      if "selected_aging_card" not in st.session_state:
+        st.session_state.selected_aging_card = None
 
       metrics_res = run_query(f"""
                 SELECT 
@@ -517,8 +519,40 @@ try:
                     GROUP BY 1 ORDER BY CASE aging_group WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8 END
                 """)
 
-        # Mengaktifkan event klik pada grafik batang menggunakan on_select="rerun"
-        selected_aging_filter = None
+        # --- TOMBOL FILTER KATEGORI AGING BERBENTUK CARD DI ATAS GRAFIK ---
+        st.markdown(
+            "📌 **Pilih Filter Kategori Aging (Klik Card untuk Memfilter):**"
+        )
+        card_cols = st.columns(len(AGING_ORDER) + 1)
+
+        with card_cols[0]:
+          if st.button("🔄 All", use_container_width=True):
+            st.session_state.selected_aging_card = None
+            st.rerun()
+
+        for idx, ag in enumerate(AGING_ORDER):
+          with card_cols[idx + 1]:
+            # Cek jumlah AWB untuk card ini
+            match_row = (
+                df_aging[df_aging["aging_group"] == ag]["total_awb"].values
+                if not df_aging.empty
+                else [0]
+            )
+            vol_ag = int(match_row[0]) if len(match_row) > 0 else 0
+            is_selected = st.session_state.selected_aging_card == ag
+            btn_label = f"✨ {ag}\n({vol_ag:,})" if is_selected else f"{ag}\n({vol_ag:,})"
+            if st.button(
+                btn_label, key=f"card_ag_{ag}", use_container_width=True
+            ):
+              st.session_state.selected_aging_card = ag
+              st.rerun()
+
+        selected_aging_filter = st.session_state.selected_aging_card
+        if selected_aging_filter:
+          st.info(
+              f"📌 Filter Aktif: **Aging = {selected_aging_filter}** (Tabel di bawah terfilter otomatis)"
+          )
+
         if not df_aging.empty:
           fig = px.bar(
               df_aging,
@@ -531,21 +565,10 @@ try:
               plot_bgcolor="rgba(40, 40, 40, 0.8)",
               paper_bgcolor="rgba(0, 0, 0, 0)",
               font=dict(color="#CCCCCC"),
-              height=350,
+              height=330,
           )
+          st.plotly_chart(fig, use_container_width=True)
 
-          chart_event = st.plotly_chart(
-              fig, use_container_width=True, on_select="rerun", key="aging_bar_chart"
-          )
-          if chart_event and "selection" in chart_event:
-            sel_points = chart_event["selection"].get("points", [])
-            if sel_points:
-              selected_aging_filter = sel_points[0].get("x")
-              st.info(
-                  f"📌 Filter Aktif dari Grafik (Klik Batang): **Aging = {selected_aging_filter}**"
-              )
-
-        # Filter tambahan berdasarkan klik batang grafik
         aging_click_clause = (
             f"AND aging_group = '{selected_aging_filter}'"
             if selected_aging_filter
