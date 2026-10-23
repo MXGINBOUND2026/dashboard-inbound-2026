@@ -631,13 +631,112 @@ try:
                     """)
           if not pivot_loc.empty:
             pivot_loc = pivot_loc.fillna(0)
-            num_cols = [
-                c
-                for c in pivot_loc.columns
-                if c not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
-            ]
+            # Memastikan semua kolom aging wujud
+            for col in AGING_ORDER:
+              if col not in pivot_loc.columns:
+                pivot_loc[col] = 0
+
+            num_cols = AGING_ORDER
             pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
-            st.dataframe(pivot_loc, use_container_width=True)
+
+            headers = list(pivot_loc.columns)
+            cell_values = []
+            for col in headers:
+              if col in [
+                  "LAST_LOCATION",
+                  "Cabang",
+                  "Zona",
+                  "Kecamatan",
+              ]:
+                cell_values.append(pivot_loc[col].astype(str).tolist())
+              else:
+                cell_values.append(
+                    [f"{int(val):,}" for val in pivot_loc[col].tolist()]
+                )
+
+            # Pewarnaan Latar Belakang & Warna Font (Conditional Formatting)
+            cell_colors = []
+            font_colors = []
+            n_rows = len(pivot_loc)
+
+            for col in headers:
+              col_color_list = []
+              col_font_list = []
+              for row_idx in range(n_rows):
+                val = (
+                    pivot_loc[col].iloc[row_idx]
+                    if col not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
+                    else 0
+                )
+
+                if col in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]:
+                  col_color_list.append("#2a2a2a")
+                  col_font_list.append("#ffffff")
+                elif col == "Grand Total":
+                  col_color_list.append("#222222")
+                  col_font_list.append("#ffffff")
+                elif col in [
+                    "H+2",
+                    "H+3",
+                    "H+4",
+                    "H+5",
+                    "H+6",
+                    "H+7",
+                    ">H+7",
+                ]:
+                  col_color_list.append("#1e1e1e")
+                  # FONT MERAH NYALA SEBAGAI ALERT JIKA ADA DATA (>0)
+                  col_font_list.append(
+                      "#ff4d4d" if val > 0 else "#666666"
+                  )  # Merah jika ada nilai, kelabu pudar jika 0
+                else:
+                  col_color_list.append("#1e1e1e")
+                  col_font_list.append("#ffffff")
+
+              cell_colors.append(col_color_list)
+              font_colors.append(col_font_list)
+
+            fig_loc_table = go.Figure(
+                data=[
+                    go.Table(
+                        header=dict(
+                            values=[f"<b>{h}</b>" for h in headers],
+                            fill_color="#333333",
+                            align="center",
+                            font=dict(color="white", size=13),
+                            height=32,
+                        ),
+                        cells=dict(
+                            values=cell_values,
+                            fill_color=cell_colors,
+                            align=[
+                                "left"
+                                if h
+                                in [
+                                    "LAST_LOCATION",
+                                    "Cabang",
+                                    "Zona",
+                                    "Kecamatan",
+                                ]
+                                else "center"
+                                for h in headers
+                            ],
+                            font=dict(color=font_colors, size=12),
+                            height=28,
+                        ),
+                    )
+                ]
+            )
+
+            fig_loc_table.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                height=400,
+            )
+
+            st.plotly_chart(fig_loc_table, use_container_width=True)
+
             st.download_button(
                 "📥 Download CSV Unrunsheet Hirarki (Lokasi, Cabang, Zona,"
                 " Kecamatan)",
