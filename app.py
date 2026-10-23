@@ -672,7 +672,7 @@ try:
             )
 
             # Menggunakan st.dataframe dengan Pandas Styler (bebas sort + font merah aktif)
-            st.dataframe(styled_pivot, use_container_width=True, height=400)
+            st.dataframe(styled_pivot, use_container_width=True)
 
             st.download_button(
                 "📥 Download CSV Unrunsheet Hirarki",
