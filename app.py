@@ -636,7 +636,7 @@ try:
             st.info("Tidak ada data Unrunsheet.")
 
         with st.expander(
-            "📋 Detail AWB UnRunsheet (Klik untuk Buka/Tutup)", expanded=False
+            "📋 Detail AWB (Klik untuk Buka/Tutup)", expanded=False
         ):
           df_detail = run_query(f"""
                         SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
