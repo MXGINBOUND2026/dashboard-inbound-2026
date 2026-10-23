@@ -894,13 +894,14 @@ try:
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
 
-        # Query Trend Inbound dengan tambahan day_filter_clause
+        # Query Trend Inbound menggunakan Last_Inbound sebagai acuan tahun
         df_inbound_trend = run_query(f"""
                     SELECT 
                         {sql_trend_group},
                         COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound
-                    {where_sql_trend} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026 {day_filter_clause}
+                    {where_sql_trend} 
+                      AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = 2026 {day_filter_clause}
                     {group_by_clause}
                 """)
 
@@ -935,7 +936,7 @@ try:
                     {where_sql_trend} 
                       AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
                       AND {sql_period_expr} IS NOT NULL
-                      AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026 {day_filter_clause}
+                      AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = 2026 {day_filter_clause}
                     GROUP BY Cabang, period_raw
                     ORDER BY period_raw ASC
                 """)
