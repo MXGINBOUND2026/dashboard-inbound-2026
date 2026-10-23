@@ -156,12 +156,14 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 
 
 # =========================================================
-# CACHED QUERY FUNCTION (LIGHTWEIGHT)
+# CACHED QUERY FUNCTION (OPTIMIZED MEMORY)
 # =========================================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_query(sql_query):
   con = duckdb.connect()
-  con.execute("SET memory_limit='256MB';")
+  # Naikkan batas memori ke 1GB dan aktifkan preserve insertion order false agar lebih hemat RAM
+  con.execute("SET memory_limit='1GB';")
+  con.execute("SET preserve_insertion_order=false;")
   con.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
         SELECT * FROM read_parquet('{LOCAL_PARQUET_PATH}')
