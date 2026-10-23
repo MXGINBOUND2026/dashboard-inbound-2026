@@ -855,35 +855,45 @@ try:
           )
           st.plotly_chart(fig_inbound, use_container_width=True)
 
-        # =========================================================
+    # =========================================================
         # TABEL PRODUKTIVITAS PER CABANG (PIVOT MEMANJANG KE KANAN)
         # =========================================================
         st.markdown("---")
         st.subheader("📋 Tabel Produktivitas Per Cabang (Memanjang ke Kanan)")
 
-        # Query data cabang dikelompokkan berdasarkan Cabang dan Periode (sesuai grafik)
+        # Query data mentah per cabang dan periode
         df_pivot_raw = run_query(f"""
                     SELECT 
                         Cabang,
-                        {sql_trend_group},
+                        {sql_period_expr} AS period_raw,
                         COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound 
                     {where_sql_trend} 
                       AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
                       AND {sql_period_expr} IS NOT NULL
                       AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
-                    GROUP BY Cabang, periode, sort_key
-                    ORDER BY sort_key ASC
+                    GROUP BY Cabang, period_raw
+                    ORDER BY period_raw ASC
                 """)
 
         if not df_pivot_raw.empty:
-          # Dapatkan list urutan periode berdasarkan sort_key
-          periods_ordered = (
-              df_pivot_raw[["periode", "sort_key"]]
-              .drop_duplicates()
-              .sort_values("sort_key")["periode"]
-              .tolist()
-          )
+          # Format label periode agar mudah dibaca sesuai mode (Harian/Mingguan/Bulanan)
+          if trend_view_mode == "Harian (Daily)":
+            df_pivot_raw["periode"] = pd.to_datetime(
+                df_pivot_raw["period_raw"]
+            ).dt.strftime("%d %b %Y")
+          elif trend_view_mode == "Mingguan (Weekly)":
+            df_pivot_raw["periode"] = (
+                "Week " + df_pivot_raw["period_raw"].astype(str)
+            )
+          else:
+            df_pivot_raw["periode"] = pd.to_datetime(
+                df_pivot_raw["period_raw"].astype(str) + "-01", errors="coerce"
+            ).dt.strftime("%b %Y")
+            df_pivot_raw["periode"] = df_pivot_raw["periode"].fillna(
+                df_pivot_raw["period_raw"]
+            )
+
           main_cabangs = [
               "Malang",
               "Blitar",
@@ -892,17 +902,17 @@ try:
               "Turen",
               "Bululawang",
           ]
+          periods_ordered = df_pivot_raw["periode"].unique().tolist()
 
-          # Buat struktur tabel pivot untuk menampung AWB dan % Growth per periode
           pivot_data = []
           for cab in main_cabangs:
             row_dict = {"Cabang": cab}
-            cab_data = df_pivot_raw[df_pivot_raw["Cabang"] == cab]
+            cab_df = df_pivot_raw[df_pivot_raw["Cabang"] == cab]
 
             prev_val = None
             for p in periods_ordered:
-              val_match = cab_data[cab_data["periode"] == p]["total_awb"].values
-              curr_val = int(val_match[0]) if len(val_match) > 0 else 0
+              match_val = cab_df[cab_df["periode"] == p]["total_awb"].values
+              curr_val = int(match_val[0]) if len(match_val) > 0 else 0
 
               row_dict[f"{p} - AWB"] = curr_val
 
@@ -927,7 +937,6 @@ try:
           )
         else:
           st.info("Tidak ada data untuk rentang waktu dan cabang tersebut.")
-
         st.markdown("---")
 
         def render_plotly_table_matrix(
