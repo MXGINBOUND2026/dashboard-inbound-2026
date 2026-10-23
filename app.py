@@ -619,7 +619,6 @@ try:
             " untuk Buka/Tutup)",
             expanded=True,
         ):
-          # Pilihan tingkat group / level ringkasan untuk mensimulasikan expand/collapse
           group_level = st.radio(
               "📌 Pilih Level Tampilan (Simulasi Collapse/Expand):",
               [
@@ -658,8 +657,22 @@ try:
 
             pivot_loc["Grand Total"] = pivot_loc[AGING_ORDER].sum(axis=1)
 
-            # Menggunakan st.dataframe agar bisa di-sort secara bebas di setiap kolomnya
-            st.dataframe(pivot_loc, use_container_width=True, height=400)
+            # Fungsi Styler untuk memberikan warna merah pada font H+2 sampai >H+7 jika nilainya > 0
+            def highlight_red_alert(val):
+              if isinstance(val, (int, float)) and val > 0:
+                return "color: #ff4d4d; font-weight: bold;"
+              return "color: #888888;"
+
+            red_alert_cols = [
+                c for c in ["H+2", "H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"] if c in pivot_loc.columns
+            ]
+
+            styled_pivot = pivot_loc.style.applymap(
+                highlight_red_alert, subset=red_alert_cols
+            )
+
+            # Menggunakan st.dataframe dengan Pandas Styler (bebas sort + font merah aktif)
+            st.dataframe(styled_pivot, use_container_width=True, height=400)
 
             st.download_button(
                 "📥 Download CSV Unrunsheet Hirarki",
@@ -1171,7 +1184,7 @@ try:
           df_succ = run_query(f"""
                         SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                         FROM v_inbound
-                        {where_sql} {week_clause}ANDA Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                        {where_sql} {week_clause} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                           AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                         GROUP BY Cabang, wus_aging_group
                     """)
