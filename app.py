@@ -619,127 +619,50 @@ try:
             " untuk Buka/Tutup)",
             expanded=True,
         ):
+          # Pilihan tingkat group / level ringkasan untuk mensimulasikan expand/collapse
+          group_level = st.radio(
+              "📌 Pilih Level Tampilan (Simulasi Collapse/Expand):",
+              [
+                  "Detail (Lokasi, Cabang, Zona, Kecamatan)",
+                  "Ringkas per Cabang",
+                  "Ringkas per Zona",
+              ],
+              horizontal=True,
+          )
+
+          if group_level == "Detail (Lokasi, Cabang, Zona, Kecamatan)":
+            group_cols = ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
+          elif group_level == "Ringkas per Cabang":
+            group_cols = ["Cabang"]
+          else:
+            group_cols = ["Cabang", "Zona"]
+
+          select_cols_sql = ", ".join(group_cols)
+
           pivot_loc = run_query(f"""
                         PIVOT (
-                            SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
+                            SELECT {select_cols_sql}, aging_group, AWB 
                             FROM v_inbound
                             {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         )
                         ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
                         USING COUNT(DISTINCT AWB)
-                        GROUP BY LAST_LOCATION, Cabang, Zona, Kecamatan
+                        GROUP BY {select_cols_sql}
                     """)
+
           if not pivot_loc.empty:
             pivot_loc = pivot_loc.fillna(0)
-            # Memastikan semua kolom aging wujud
             for col in AGING_ORDER:
               if col not in pivot_loc.columns:
                 pivot_loc[col] = 0
 
-            num_cols = AGING_ORDER
-            pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
+            pivot_loc["Grand Total"] = pivot_loc[AGING_ORDER].sum(axis=1)
 
-            headers = list(pivot_loc.columns)
-            cell_values = []
-            for col in headers:
-              if col in [
-                  "LAST_LOCATION",
-                  "Cabang",
-                  "Zona",
-                  "Kecamatan",
-              ]:
-                cell_values.append(pivot_loc[col].astype(str).tolist())
-              else:
-                cell_values.append(
-                    [f"{int(val):,}" for val in pivot_loc[col].tolist()]
-                )
-
-            # Pewarnaan Latar Belakang & Warna Font (Conditional Formatting)
-            cell_colors = []
-            font_colors = []
-            n_rows = len(pivot_loc)
-
-            for col in headers:
-              col_color_list = []
-              col_font_list = []
-              for row_idx in range(n_rows):
-                val = (
-                    pivot_loc[col].iloc[row_idx]
-                    if col not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
-                    else 0
-                )
-
-                if col in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]:
-                  col_color_list.append("#2a2a2a")
-                  col_font_list.append("#ffffff")
-                elif col == "Grand Total":
-                  col_color_list.append("#222222")
-                  col_font_list.append("#ffffff")
-                elif col in [
-                    "H+2",
-                    "H+3",
-                    "H+4",
-                    "H+5",
-                    "H+6",
-                    "H+7",
-                    ">H+7",
-                ]:
-                  col_color_list.append("#1e1e1e")
-                  # FONT MERAH NYALA SEBAGAI ALERT JIKA ADA DATA (>0)
-                  col_font_list.append(
-                      "#ff4d4d" if val > 0 else "#666666"
-                  )  # Merah jika ada nilai, kelabu pudar jika 0
-                else:
-                  col_color_list.append("#1e1e1e")
-                  col_font_list.append("#ffffff")
-
-              cell_colors.append(col_color_list)
-              font_colors.append(col_font_list)
-
-            fig_loc_table = go.Figure(
-                data=[
-                    go.Table(
-                        header=dict(
-                            values=[f"<b>{h}</b>" for h in headers],
-                            fill_color="#333333",
-                            align="center",
-                            font=dict(color="white", size=13),
-                            height=32,
-                        ),
-                        cells=dict(
-                            values=cell_values,
-                            fill_color=cell_colors,
-                            align=[
-                                "left"
-                                if h
-                                in [
-                                    "LAST_LOCATION",
-                                    "Cabang",
-                                    "Zona",
-                                    "Kecamatan",
-                                ]
-                                else "center"
-                                for h in headers
-                            ],
-                            font=dict(color=font_colors, size=12),
-                            height=28,
-                        ),
-                    )
-                ]
-            )
-
-            fig_loc_table.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                height=400,
-            )
-
-            st.plotly_chart(fig_loc_table, use_container_width=True)
+            # Menggunakan st.dataframe agar bisa di-sort secara bebas di setiap kolomnya
+            st.dataframe(pivot_loc, use_container_width=True, height=400)
 
             st.download_button(
-                "📥 Download CSV Unrunsheet Hirarki (Lokasi, Cabang, Zona,"
-                " Kecamatan)",
+                "📥 Download CSV Unrunsheet Hirarki",
                 pivot_loc.to_csv(index=False).encode("utf-8"),
                 file_name="Unrunsheet_Hirarki_Lokasi.csv",
                 mime="text/csv",
@@ -1248,7 +1171,7 @@ try:
           df_succ = run_query(f"""
                         SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                         FROM v_inbound
-                        {where_sql} {week_clause} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                        {where_sql} {week_clause}ANDA Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
                           AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
                         GROUP BY Cabang, wus_aging_group
                     """)
