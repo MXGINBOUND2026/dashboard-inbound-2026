@@ -672,8 +672,7 @@ try:
     if summary_pass == "MXG125":
       with st.spinner("⏳ Memuat Executive Summary & Analytics..."):
         st.title(
-            "📊 Executive Summary & Performance Analytics (WUS vs POD"
-            " Validation)"
+            "📊 Executive Summary & Performance Analytics"
         )
 
         avail_weeks_df = run_query(f"""
@@ -864,7 +863,7 @@ try:
         # TABEL PRODUKTIVITAS PER CABANG (PIVOT MEMANJANG KE KANAN)
         # =========================================================
         st.markdown("---")
-        st.subheader("📋 Tabel Produktivitas Per Cabang (Memanjang ke Kanan)")
+        st.subheader("📋 Tabel Produktivitas")
 
         df_pivot_raw = run_query(f"""
                     SELECT 
