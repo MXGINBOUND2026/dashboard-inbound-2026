@@ -658,7 +658,7 @@ try:
       else:
         st.subheader("⚠️ Tabel UnInbound")
         df_uninbound_show = run_query(f"""
-                    SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging Last Inbound (Hari)", SERVICE, Status_Shipment, HRS
+                    SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
                     FROM v_inbound {where_sql} AND Status_Shipment = 'UnInbound'
                     ORDER BY age_days DESC LIMIT 500
                 """)
