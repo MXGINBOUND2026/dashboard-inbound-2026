@@ -362,7 +362,7 @@ try:
           f"""
             <div class="marquee-container-tab1">
                 <div class="marquee-text-tab1">
-                    🔄 Last Update At: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🏆 Top 5 Kecamatan UnRunsheet: {top_kecamatan_str}
+                    🔄 Last Update At: {formatted_date} &nbsp;&nbsp;|&nbsp;&nbsp; 🔥 Top 5 Kecamatan UnRunsheet: {top_kecamatan_str}
                 </div>
             </div>
         """,
