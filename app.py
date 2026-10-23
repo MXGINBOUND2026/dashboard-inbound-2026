@@ -37,8 +37,8 @@ st.markdown(
     }
     .marquee-text-tab1, .marquee-text-tab2 {
         display: inline-block;
-        padding-left: 100%;
-        animation: marquee 35s linear infinite;
+        padding-left: 75%;
+        animation: marquee 50s linear infinite;
         color: #1f77b4;
         font-weight: 600;
         font-size: 14px;
