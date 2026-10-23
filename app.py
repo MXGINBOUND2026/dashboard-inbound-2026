@@ -139,7 +139,7 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_query(sql_query):
   con = duckdb.connect()
-  con.execute("SET memory_limit='1GB';")
+  con.execute("SET memory_limit='512MB';")
   con.execute("SET preserve_insertion_order=false;")
   con.execute(f"""
         CREATE OR REPLACE VIEW v_inbound AS 
@@ -479,19 +479,32 @@ try:
           else:
             card_query_filter = "1=1"
 
-          df_card_detail = run_query(f"""
+          # Tampilan dibatasi 200 baris untuk layar
+          df_card_detail_display = run_query(f"""
                         SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
-                        ORDER BY age_days DESC LIMIT 500
+                        ORDER BY age_days DESC LIMIT 200
                     """)
-          if not df_card_detail.empty:
-            st.dataframe(df_card_detail, use_container_width=True, height=300)
+          # Data penuh untuk download
+          df_card_detail_full = run_query(f"""
+                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
+                        FROM v_inbound {where_sql} AND {card_query_filter}
+                        ORDER BY age_days DESC
+                    """)
+          if not df_card_detail_display.empty:
+            st.dataframe(
+                df_card_detail_display, use_container_width=True, height=300
+            )
+            st.caption(
+                "ℹ️ Ditampilkan 200 baris teratas untuk performa. Gunakan tombol"
+                " di bawah untuk mengunduh seluruh data lengkap."
+            )
             c_dl, c_rst = st.columns([3, 1])
             with c_dl:
               st.download_button(
-                  f"📥 Download CSV [{card_title}]",
-                  df_card_detail.to_csv(index=False).encode("utf-8"),
-                  file_name=f"Detail_{card_title}.csv",
+                  f"📥 Download CSV Lengkap [{card_title}]",
+                  df_card_detail_full.to_csv(index=False).encode("utf-8"),
+                  file_name=f"Detail_{card_title}_Full.csv",
                   mime="text/csv",
               )
             with c_rst:
@@ -638,18 +651,27 @@ try:
         with st.expander(
             "📋 Detail AWB (Klik untuk Buka/Tutup)", expanded=False
         ):
-          df_detail = run_query(f"""
+          df_detail_display = run_query(f"""
                         SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         ORDER BY age_days DESC
-                        LIMIT 300
+                        LIMIT 200
                     """)
-          if not df_detail.empty:
-            st.dataframe(df_detail, use_container_width=True)
+          df_detail_full = run_query(f"""
+                        SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                        FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
+                        ORDER BY age_days DESC
+                    """)
+          if not df_detail_display.empty:
+            st.dataframe(df_detail_display, use_container_width=True)
+            st.caption(
+                "ℹ️ Ditampilkan 200 baris teratas. Gunakan tombol di bawah"
+                " untuk mengunduh seluruh data lengkap."
+            )
             st.download_button(
-                "📥 Download CSV Detail UnRunsheet",
-                df_detail.to_csv(index=False).encode("utf-8"),
-                file_name="Detail_UnRunsheet.csv",
+                "📥 Download CSV Lengkap Detail UnRunsheet",
+                df_detail_full.to_csv(index=False).encode("utf-8"),
+                file_name="Detail_UnRunsheet_Full.csv",
                 mime="text/csv",
             )
           else:
@@ -657,13 +679,28 @@ try:
 
       else:
         st.subheader("⚠️ Tabel UnInbound")
-        df_uninbound_show = run_query(f"""
+        df_uninbound_display = run_query(f"""
                     SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
                     FROM v_inbound {where_sql} AND Status_Shipment = 'UnInbound'
-                    ORDER BY age_days DESC LIMIT 500
+                    ORDER BY age_days DESC LIMIT 200
                 """)
-        if not df_uninbound_show.empty:
-          st.dataframe(df_uninbound_show, use_container_width=True)
+        df_uninbound_full = run_query(f"""
+                    SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
+                    FROM v_inbound {where_sql} AND Status_Shipment = 'UnInbound'
+                    ORDER BY age_days DESC
+                """)
+        if not df_uninbound_display.empty:
+          st.dataframe(df_uninbound_display, use_container_width=True)
+          st.caption(
+              "ℹ️ Ditampilkan 200 baris teratas. Gunakan tombol di bawah"
+              " untuk mengunduh seluruh data lengkap."
+          )
+          st.download_button(
+              "📥 Download CSV Lengkap UnInbound",
+              df_uninbound_full.to_csv(index=False).encode("utf-8"),
+              file_name="UnInbound_Full.csv",
+              mime="text/csv",
+          )
 
   # =========================================================
   # TAB 2: SUMMARY EXEC
