@@ -258,23 +258,15 @@ try:
       else datetime.date.today()
   )
 
+  # BISA DIKOSONGKAN SAAT MEMILIH/DENGAN MENGHAPUS ISINYA
   with st.sidebar.form("filter_form"):
-    st.markdown("📅 **Filter Tanggal Last Inbound**")
-    date_filter_mode = st.radio(
-        "Mode Filter Tanggal:",
-        ["Semua Tanggal (Termasuk UnInbound)", "Pilih Rentang Tanggal"],
-        index=0,
-        label_visibility="collapsed",
+    date_range = st.date_input(
+        "📅 Filter Rentang Tanggal (Kosongkan untuk Semua Data):",
+        value=(),  # Default kosong agar membaca semua tanggal termasuk UnInbound
+        min_value=default_start,
+        max_value=default_end,
+        help="Kosongkan nilai ini jika ingin menampilkan seluruh data termasuk yang tanpa tanggal (UnInbound)",
     )
-
-    date_range = None
-    if date_filter_mode == "Pilih Rentang Tanggal":
-      date_range = st.date_input(
-          "Rentang Tanggal Last Inbound:",
-          value=(default_start, default_end),
-          min_value=default_start,
-          max_value=default_end,
-      )
 
     chosen_loc = st.multiselect("🔍 Filter Last Location:", unique_locations)
     chosen_cabang = st.multiselect("🏢 Filter Cabang:", unique_cabang)
@@ -302,9 +294,9 @@ try:
 
 
   where_clauses = []
-  if date_filter_mode == "Pilih Rentang Tanggal" and isinstance(
-      date_range, tuple
-  ) and len(date_range) == 2:
+
+  # LOGIKA FILTER TANGGAL: HANYA DITAMBAHKAN JIKA RENTANG TANGGAL DIISI LENGKAP (2 TANGGAL)
+  if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
     where_clauses.append(
         f"CAST(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
@@ -588,7 +580,7 @@ try:
           st.dataframe(df_uninbound_show, use_container_width=True)
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC (LENGKAP DENGAN TABEL INFOGRAFIS PLOTLY IN EXPANDER)
+  # TAB 2: SUMMARY EXEC
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
@@ -742,7 +734,6 @@ try:
 
         st.markdown("---")
 
-        # FUNGSI UNTUK MERENDER TABEL INFOGRAFIS WARNA-WARNI DENGAN PLOTLY
         def render_plotly_table_matrix(
             df_raw, title_text, csv_filename, download_label
         ):
@@ -861,7 +852,6 @@ try:
               mime="text/csv",
           )
 
-        # TABEL MATRIKS INFOGRAFIS WARNA-WARNI DISIMPAN DI DALAM EXPANDER
         with st.expander(
             "📊 2. Matrix Infografis UnRunsheet Per Cabang (Klik untuk"
             " Buka/Tutup)",
