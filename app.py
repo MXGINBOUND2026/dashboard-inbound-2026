@@ -152,10 +152,11 @@ def run_query(sql_query):
 
 try:
   # =========================================================
-  # FILTER GLOBAL MENGGUNAKAN FORM & AMBIL OPSI DENGAN CACHE
+  # FILTER GLOBAL MENGGUNAKAN FORM & CACHED OPTIONS
   # =========================================================
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
+
 
   @st.cache_data(ttl=3600)
   def get_filter_options():
@@ -218,6 +219,7 @@ try:
     con.close()
     return locs, cab, zon, kec, stat, hrs, minmax
 
+
   (
       unique_locations,
       unique_cabang_db,
@@ -270,15 +272,19 @@ try:
     chosen_loc = st.multiselect("🔍 Filter Last Location:", unique_locations)
     chosen_cabang = st.multiselect("🏢 Filter Cabang:", unique_cabang)
     chosen_zona = st.multiselect("⚡ Filter Zona (QCE):", unique_zona)
-    chosen_kecamatan = st.multiselect("📍 Filter Kecamatan:", unique_kecamatan)
-    chosen_status = st.multiselect("📦 Filter Shipment Status:", unique_status)
+    chosen_kecamatan = st.multiselect(
+        "📍 Filter Kecamatan:", unique_kecamatan
+    )
+    chosen_status = st.multiselect(
+        "📦 Filter Shipment Status:", unique_status
+    )
     chosen_hrs = st.multiselect("📋 Filter Status HRS:", unique_hrs)
 
     submit_filter = st.form_submit_button(
         "🚀 Terapkan Filter", use_container_width=True
     )
 
-  # FUNGSI PEMBENTUKAN SQL CLAUSE SECARA AMAN (MENGHINDARI EROR CONVERSION EXCEPTION)
+
   def build_in_clause(column_name, selected_list):
     if not selected_list:
       return None
@@ -286,6 +292,7 @@ try:
         f"'{str(item).replace('\'', '\'\'')}'" for item in selected_list
     ]
     return f"{column_name} IN ({', '.join(formatted_items)})"
+
 
   where_clauses = []
   if use_date_filter and isinstance(date_range, tuple) and len(date_range) == 2:
@@ -516,6 +523,51 @@ try:
           )
           st.plotly_chart(fig, use_container_width=True)
 
+        st.markdown("---")
+
+        with st.expander(
+            "📊 Tabel Matrix Status Shipment (Klik untuk Buka/Tutup)",
+            expanded=False,
+        ):
+          pivot_matrix = run_query(f"""
+                        PIVOT (
+                            SELECT Status_Shipment, aging_group, AWB 
+                            FROM v_inbound {where_sql}
+                        )
+                        ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                        USING COUNT(DISTINCT AWB)
+                        GROUP BY Status_Shipment
+                    """)
+          if not pivot_matrix.empty:
+            pivot_matrix = pivot_matrix.fillna(0)
+            numeric_cols = [
+                c for c in pivot_matrix.columns if c != "Status_Shipment"
+            ]
+            pivot_matrix["Grand Total"] = pivot_matrix[numeric_cols].sum(axis=1)
+            st.dataframe(pivot_matrix, use_container_width=True)
+          else:
+            st.info("Tidak ada data untuk matriks.")
+
+        with st.expander(
+            "📋 Detail AWB UnRunsheet (Klik untuk Buka/Tutup)", expanded=False
+        ):
+          df_detail = run_query(f"""
+                        SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                        FROM v_inbound {where_sql} {unrunsheet_status_clause}
+                        ORDER BY age_days DESC
+                        LIMIT 300
+                    """)
+          if not df_detail.empty:
+            st.dataframe(df_detail, use_container_width=True)
+            st.download_button(
+                "📥 Download CSV Detail UnRunsheet",
+                df_detail.to_csv(index=False).encode("utf-8"),
+                file_name="Detail_UnRunsheet.csv",
+                mime="text/csv",
+            )
+          else:
+            st.info("Tidak ada data detail.")
+
       else:
         st.subheader("⚠️ Tabel UnInbound")
         df_uninbound_show = run_query(f"""
@@ -527,11 +579,11 @@ try:
           st.dataframe(df_uninbound_show, use_container_width=True)
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC (LENGKAP DENGAN PERFORMANCE ANALYTICS)
+  # TAB 2: SUMMARY EXEC
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
-      with st.spinner("⏳ Memuat Executive Summary & Performance Analytics..."):
+      with st.spinner("⏳ Memuat Executive Summary & Analytics..."):
         st.title(
             "📊 Executive Summary & Performance Analytics (WUS vs POD"
             " Validation)"
@@ -680,7 +732,10 @@ try:
           st.plotly_chart(fig_inbound, use_container_width=True)
 
     else:
-      st.warning("🔐 Masukkan password 'Summary Exec' yang benar di sidebar kiri.")
+      st.warning(
+          "🔐 Masukkan password 'Summary Exec' yang benar di sidebar kiri untuk"
+          " melihat halaman ini."
+      )
 
 except Exception as main_err:
   st.error("⚠️ Terjadi masalah saat mengolah data dashboard:")
