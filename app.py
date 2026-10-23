@@ -861,7 +861,6 @@ try:
         st.markdown("---")
         st.subheader("📋 Tabel Produktivitas Per Cabang (Memanjang ke Kanan)")
 
-        # Query data mentah per cabang dan periode
         df_pivot_raw = run_query(f"""
                     SELECT 
                         Cabang,
@@ -877,7 +876,6 @@ try:
                 """)
 
         if not df_pivot_raw.empty:
-          # Format label periode agar mudah dibaca sesuai mode (Harian/Mingguan/Bulanan)
           if trend_view_mode == "Harian (Daily)":
             df_pivot_raw["periode"] = pd.to_datetime(
                 df_pivot_raw["period_raw"]
@@ -914,20 +912,23 @@ try:
               match_val = cab_df[cab_df["periode"] == p]["total_awb"].values
               curr_val = int(match_val[0]) if len(match_val) > 0 else 0
 
-              row_dict[f"{p} - AWB"] = curr_val
+              # Pisahkan kolom agar Streamlit dataframe dapat merender dengan stabil
+              row_dict[f"{p} (AWB)"] = curr_val
 
               if prev_val is not None and prev_val > 0:
                 growth = ((curr_val - prev_val) / prev_val) * 100.0
-                row_dict[f"{p} - % Growth"] = f"{growth:+.2f}%"
+                row_dict[f"{p} (% Growth)"] = f"{growth:+.2f}%"
               else:
-                row_dict[f"{p} - % Growth"] = "0.00%"
+                row_dict[f"{p} (% Growth)"] = "0.00%"
 
               prev_val = curr_val if curr_val > 0 else prev_val
 
             pivot_data.append(row_dict)
 
           df_final_pivot = pd.DataFrame(pivot_data)
-          st.dataframe(df_final_pivot, use_container_width=True)
+
+          # Tampilkan menggunakan st.altair_chart / st.dataframe dengan penyesuaian lebar
+          st.dataframe(df_final_pivot, use_container_width=True, height=280)
 
           st.download_button(
               "📥 Download CSV Produktivitas Cabang (Pivot)",
