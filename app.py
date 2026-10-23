@@ -152,7 +152,7 @@ def run_query(sql_query):
 
 try:
   # =========================================================
-  # FILTER GLOBAL MENGGUNAKAN FORM & CACHED OPTIONS
+  # FILTER GLOBAL SIDEBAR
   # =========================================================
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 Filter Data Dashboard")
@@ -259,15 +259,22 @@ try:
   )
 
   with st.sidebar.form("filter_form"):
-    use_date_filter = st.checkbox(
-        "📅 Aktifkan Filter Tanggal Last Inbound", value=False
+    st.markdown("📅 **Filter Tanggal Last Inbound**")
+    date_filter_mode = st.radio(
+        "Mode Filter Tanggal:",
+        ["Semua Tanggal (Termasuk UnInbound)", "Pilih Rentang Tanggal"],
+        index=0,
+        label_visibility="collapsed",
     )
-    date_range = st.date_input(
-        "Pilih Rentang Tanggal:",
-        value=(default_start, default_end),
-        min_value=default_start,
-        max_value=default_end,
-    )
+
+    date_range = None
+    if date_filter_mode == "Pilih Rentang Tanggal":
+      date_range = st.date_input(
+          "Rentang Tanggal Last Inbound:",
+          value=(default_start, default_end),
+          min_value=default_start,
+          max_value=default_end,
+      )
 
     chosen_loc = st.multiselect("🔍 Filter Last Location:", unique_locations)
     chosen_cabang = st.multiselect("🏢 Filter Cabang:", unique_cabang)
@@ -295,7 +302,9 @@ try:
 
 
   where_clauses = []
-  if use_date_filter and isinstance(date_range, tuple) and len(date_range) == 2:
+  if date_filter_mode == "Pilih Rentang Tanggal" and isinstance(
+      date_range, tuple
+  ) and len(date_range) == 2:
     start_d, end_d = date_range
     where_clauses.append(
         f"CAST(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
@@ -579,7 +588,7 @@ try:
           st.dataframe(df_uninbound_show, use_container_width=True)
 
   # =========================================================
-  # TAB 2: SUMMARY EXEC
+  # TAB 2: SUMMARY EXEC (LENGKAP DENGAN TABEL INFOGRAFIS PLOTLY IN EXPANDER)
   # =========================================================
   with tab2:
     if summary_pass == "MXG125":
@@ -730,6 +739,185 @@ try:
               height=330,
           )
           st.plotly_chart(fig_inbound, use_container_width=True)
+
+        st.markdown("---")
+
+        # FUNGSI UNTUK MERENDER TABEL INFOGRAFIS WARNA-WARNI DENGAN PLOTLY
+        def render_plotly_table_matrix(
+            df_raw, title_text, csv_filename, download_label
+        ):
+          if df_raw.empty:
+            st.info("Tidak ada data.")
+            return
+
+          pivot = df_raw.pivot(
+              index="Cabang", columns="aging_group", values="total_awb"
+          ).fillna(0)
+          for col in AGING_ORDER:
+            if col not in pivot.columns:
+              pivot[col] = 0
+
+          pivot = pivot[AGING_ORDER]
+          pivot["Grand Total"] = pivot[AGING_ORDER].sum(axis=1)
+          pivot = pivot.sort_values(by="Grand Total", ascending=False)
+
+          grand_total_row = pivot.sum(axis=0)
+          grand_total_row.name = "Grand Total"
+
+          pivot_with_total = pd.concat([pivot, pd.DataFrame([grand_total_row])])
+          pivot_with_total = pivot_with_total.reset_index().rename(
+              columns={"index": "Cabang"}
+          )
+
+          headers = list(pivot_with_total.columns)
+          cell_values = []
+          for col in headers:
+            if col == "Cabang":
+              cell_values.append(pivot_with_total[col].astype(str).tolist())
+            else:
+              cell_values.append(
+                  [f"{int(val):,}" for val in pivot_with_total[col].tolist()]
+              )
+
+          cell_colors = []
+          n_rows = len(pivot_with_total)
+
+          for col in headers:
+            col_color_list = []
+            for row_idx in range(n_rows):
+              if row_idx == n_rows - 1:
+                col_color_list.append("#222222")
+              elif col in ["Cabang", "Grand Total"]:
+                col_color_list.append("#2a2a2a")
+              else:
+                val = pivot_with_total[col].iloc[row_idx]
+                if col == "H+0":
+                  col_color_list.append("#28a745" if val > 0 else "#1e1e1e")
+                elif col in ["H+1", "H+2"]:
+                  col_color_list.append("#ffc107" if val > 0 else "#1e1e1e")
+                elif col in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]:
+                  col_color_list.append("#dc3545" if val > 0 else "#1e1e1e")
+                else:
+                  col_color_list.append("#1e1e1e")
+            cell_colors.append(col_color_list)
+
+          font_colors = []
+          for col in headers:
+            col_font_list = []
+            for row_idx in range(n_rows):
+              if row_idx == n_rows - 1:
+                col_font_list.append("#ffffff")
+              elif col in ["H+1", "H+2"]:
+                val = pivot_with_total[col].iloc[row_idx]
+                col_font_list.append("#000000" if val > 0 else "#ffffff")
+              else:
+                col_font_list.append("#ffffff")
+            font_colors.append(col_font_list)
+
+          fig_table = go.Figure(
+              data=[
+                  go.Table(
+                      header=dict(
+                          values=[f"<b>{h}</b>" for h in headers],
+                          fill_color="#333333",
+                          align="center",
+                          font=dict(color="white", size=13),
+                          height=32,
+                      ),
+                      cells=dict(
+                          values=cell_values,
+                          fill_color=cell_colors,
+                          align=[
+                              "left" if h == "Cabang" else "center"
+                              for h in headers
+                          ],
+                          font=dict(color=font_colors, size=12),
+                          height=28,
+                      ),
+                  )
+              ]
+          )
+
+          fig_table.update_layout(
+              title=dict(
+                  text=f"<b>{title_text}</b>",
+                  x=0,
+                  xanchor="left",
+                  font=dict(size=16, color="#FFFFFF"),
+              ),
+              margin=dict(l=10, r=10, t=50, b=10),
+              paper_bgcolor="rgba(0,0,0,0)",
+              plot_bgcolor="rgba(0,0,0,0)",
+              height=320,
+          )
+
+          st.plotly_chart(fig_table, use_container_width=True)
+
+          csv_data = pivot_with_total.to_csv(index=False).encode("utf-8")
+          st.download_button(
+              label=download_label,
+              data=csv_data,
+              file_name=csv_filename,
+              mime="text/csv",
+          )
+
+        # TABEL MATRIKS INFOGRAFIS WARNA-WARNI DISIMPAN DI DALAM EXPANDER
+        with st.expander(
+            "📊 2. Matrix Infografis UnRunsheet Per Cabang (Klik untuk"
+            " Buka/Tutup)",
+            expanded=False,
+        ):
+          df_unrun = run_query(f"""
+                        SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb 
+                        FROM v_inbound
+                        {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                        GROUP BY Cabang, aging_group
+                    """)
+          render_plotly_table_matrix(
+              df_unrun,
+              "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging"
+              " Last_Inbound)",
+              "Matrix_UnRunsheet_Cabang.csv",
+              "📥 Download Data Matrix UnRunsheet (CSV)",
+          )
+
+        with st.expander(
+            "📊 3. Matrix Infografis Success UnHRS Per Cabang (Klik untuk"
+            " Buka/Tutup)",
+            expanded=False,
+        ):
+          df_succ = run_query(f"""
+                        SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
+                        FROM v_inbound
+                        {where_sql} {week_clause} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
+                          AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                        GROUP BY Cabang, wus_aging_group
+                    """)
+          render_plotly_table_matrix(
+              df_succ,
+              "📊 3. Matrix Infografis Success UnHRS Per Cabang",
+              "Matrix_Success_UnHRS_Cabang.csv",
+              "📥 Download Data Matrix Success UnHRS (CSV)",
+          )
+
+        with st.expander(
+            "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Klik untuk"
+            " Buka/Tutup)",
+            expanded=False,
+        ):
+          df_undel = run_query(f"""
+                        SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
+                        FROM v_inbound
+                        {where_sql} {week_clause} AND Status_Shipment = 'UNDELIVERY'
+                          AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                        GROUP BY Cabang, wus_aging_group
+                    """)
+          render_plotly_table_matrix(
+              df_undel,
+              "📊 4. Matrix Infografis Undel UnHRS Per Cabang",
+              "Matrix_Undel_UnHRS_Cabang.csv",
+              "📥 Download Data Matrix Undel UnHRS (CSV)",
+          )
 
     else:
       st.warning(
