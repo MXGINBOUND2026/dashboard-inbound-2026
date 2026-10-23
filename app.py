@@ -258,11 +258,10 @@ try:
       else datetime.date.today()
   )
 
-  # BISA DIKOSONGKAN SAAT MEMILIH/DENGAN MENGHAPUS ISINYA
   with st.sidebar.form("filter_form"):
     date_range = st.date_input(
         "📅 Filter Rentang Tanggal (Kosongkan untuk Semua Data):",
-        value=(),  # Default kosong agar membaca semua tanggal termasuk UnInbound
+        value=(),
         min_value=default_start,
         max_value=default_end,
         help="Kosongkan nilai ini jika ingin menampilkan seluruh data termasuk yang tanpa tanggal (UnInbound)",
@@ -293,30 +292,42 @@ try:
     return f"{column_name} IN ({', '.join(formatted_items)})"
 
 
-  where_clauses = []
-
-  # LOGIKA FILTER TANGGAL: HANYA DITAMBAHKAN JIKA RENTANG TANGGAL DIISI LENGKAP (2 TANGGAL)
+  # Klausa filter umum (mengikutsertakan semua filter kecuali Status_Shipment untuk grafik tren)
+  where_clauses_general = []
   if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
-    where_clauses.append(
+    where_clauses_general.append(
         f"CAST(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
     )
 
   if chosen_loc:
-    where_clauses.append(build_in_clause("LAST_LOCATION", chosen_loc))
+    where_clauses_general.append(build_in_clause("LAST_LOCATION", chosen_loc))
   if chosen_cabang:
-    where_clauses.append(build_in_clause("Cabang", chosen_cabang))
+    where_clauses_general.append(build_in_clause("Cabang", chosen_cabang))
   if chosen_zona:
-    where_clauses.append(build_in_clause("Zona", chosen_zona))
+    where_clauses_general.append(build_in_clause("Zona", chosen_zona))
   if chosen_kecamatan:
-    where_clauses.append(build_in_clause("Kecamatan", chosen_kecamatan))
-  if chosen_status:
-    where_clauses.append(build_in_clause("Status_Shipment", chosen_status))
+    where_clauses_general.append(
+        build_in_clause("Kecamatan", chosen_kecamatan)
+    )
   if chosen_hrs:
-    where_clauses.append(build_in_clause("HRS", chosen_hrs))
+    where_clauses_general.append(build_in_clause("HRS", chosen_hrs))
+
+  # where_sql lengkap dengan status shipment (untuk dashboard utama)
+  where_clauses_full = list(where_clauses_general)
+  if chosen_status:
+    where_clauses_full.append(build_in_clause("Status_Shipment", chosen_status))
 
   where_sql = (
-      "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
+      "WHERE " + " AND ".join(where_clauses_full)
+      if where_clauses_full
+      else "WHERE 1=1"
+  )
+  # where_sql khusus tanpa status shipment (untuk grafik tren inbound agar tidak terpengaruh filter status)
+  where_sql_trend = (
+      "WHERE " + " AND ".join(where_clauses_general)
+      if where_clauses_general
+      else "WHERE 1=1"
   )
 
   tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
@@ -549,6 +560,40 @@ try:
           else:
             st.info("Tidak ada data untuk matriks.")
 
+        # --- TABEL KHUSUS UNRUNSHEET DENGAN LAST_LOCATION, CABANG, ZONA, KECAMATAN ---
+        with st.expander(
+            "🗂️ Unrunsheet By Last Location, Cabang, Zona, Kecamatan (Klik"
+            " untuk Buka/Tutup)",
+            expanded=True,
+        ):
+          pivot_loc = run_query(f"""
+                        PIVOT (
+                            SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
+                            FROM v_inbound
+                            {where_sql} {unrunsheet_status_clause}
+                        )
+                        ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
+                        USING COUNT(DISTINCT AWB)
+                        GROUP BY LAST_LOCATION, Cabang, Zona, Kecamatan
+                    """)
+          if not pivot_loc.empty:
+            pivot_loc = pivot_loc.fillna(0)
+            num_cols = [
+                c
+                for c in pivot_loc.columns
+                if c not in ["LAST_LOCATION", "Cabang", "Zona", "Kecamatan"]
+            ]
+            pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
+            st.dataframe(pivot_loc, use_container_width=True)
+            st.download_button(
+                "📥 Download CSV Unrunsheet Hirarki (Lokasi, Cabang, Zona, Kecamatan)",
+                pivot_loc.to_csv(index=False).encode("utf-8"),
+                file_name="Unrunsheet_Hirarki_Lokasi.csv",
+                mime="text/csv",
+            )
+          else:
+            st.info("Tidak ada data Unrunsheet.")
+
         with st.expander(
             "📋 Detail AWB UnRunsheet (Klik untuk Buka/Tutup)", expanded=False
         ):
@@ -706,13 +751,14 @@ try:
         st.markdown("---")
         st.subheader("📈 Total Inbound Per Tanggal (Tahun 2026)")
 
+        # Grafik Trend Inbound menggunakan where_sql_trend (Bebas dari Filter Shipment Status)
         df_inbound_trend = run_query(f"""
                     SELECT 
                         STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b') AS periode,
                         COUNT(DISTINCT AWB) AS total_awb,
                         MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
                     FROM v_inbound
-                    {where_sql} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                    {where_sql_trend} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
                     GROUP BY 1 ORDER BY sort_key ASC
                 """)
 
