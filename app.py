@@ -1139,7 +1139,7 @@ try:
                   text=f"<b>{title_text}</b>",
                   x=0,
                   xanchor="left",
-                  font=dict(size=16, color="#FFFFFF"),
+                  font=dict(size=16),  # Warna otomatis mengikuti tema Streamlit (terang/gelap)
               ),
               margin=dict(l=10, r=10, t=50, b=10),
               paper_bgcolor="rgba(0,0,0,0)",
