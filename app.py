@@ -394,7 +394,24 @@ try:
       total_success_unhrs = metrics_res["total_success_unhrs"][0] or 0
       total_undel_unhrs = metrics_res["total_undel_unhrs"][0] or 0
 
-    c1, c2, c3, c4 = st.columns(4)
+    # CSS Styling khusus untuk Card Metric di Main Dashboard
+      st.markdown(
+          """
+        <style>
+        div[data-testid="stMetric"] {
+            background-color: #1e1e1e;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border-left: 4px solid #1f77b4;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            margin-bottom: 8px;
+        }
+        </style>
+      """,
+          unsafe_allow_html=True,
+      )
+
+      c1, c2, c3, c4 = st.columns(4)
       with c1:
         st.metric(label="📦 Total AWB", value=f"{total_awb:,}")
       with c2:
@@ -432,6 +449,25 @@ try:
           st.session_state.active_card_filter = "UnRunsheet with PRA"
           st.rerun()
 
+      col_m1, col_m2 = st.columns(2)
+      with col_m1:
+        st.metric(label="⚠️ Success UnHRS", value=f"{total_success_unhrs:,}")
+        if st.button(
+            "📋 Lihat Detail Success UnHRS",
+            key="btn_success_unhrs",
+            use_container_width=True,
+        ):
+          st.session_state.active_card_filter = "Success UnHRS"
+          st.rerun()
+      with col_m2:
+        st.metric(label="❌ Undel UnHRS", value=f"{total_undel_unhrs:,}")
+        if st.button(
+            "📋 Lihat Detail Undel UnHRS",
+            key="btn_undel_unhrs",
+            use_container_width=True,
+        ):
+          st.session_state.active_card_filter = "Undel UnHRS"
+          st.rerun()
       col_m1, col_m2 = st.columns(2)
       with col_m1:
         st.metric(label="⚠️ Success UnHRS", value=f"{total_success_unhrs:,}")
