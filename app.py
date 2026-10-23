@@ -292,7 +292,6 @@ try:
     return f"{column_name} IN ({', '.join(formatted_items)})"
 
 
-  # Klausa filter umum (mengikutsertakan semua filter kecuali Status_Shipment untuk grafik tren)
   where_clauses_general = []
   if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
@@ -313,7 +312,6 @@ try:
   if chosen_hrs:
     where_clauses_general.append(build_in_clause("HRS", chosen_hrs))
 
-  # where_sql lengkap dengan status shipment (untuk dashboard utama)
   where_clauses_full = list(where_clauses_general)
   if chosen_status:
     where_clauses_full.append(build_in_clause("Status_Shipment", chosen_status))
@@ -323,7 +321,6 @@ try:
       if where_clauses_full
       else "WHERE 1=1"
   )
-  # where_sql khusus tanpa status shipment (untuk grafik tren inbound agar tidak terpengaruh filter status)
   where_sql_trend = (
       "WHERE " + " AND ".join(where_clauses_general)
       if where_clauses_general
@@ -519,6 +516,9 @@ try:
                     FROM v_inbound {where_sql} {unrunsheet_status_clause}
                     GROUP BY 1 ORDER BY CASE aging_group WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8 END
                 """)
+
+        # Mengaktifkan event klik pada grafik batang menggunakan on_select="rerun"
+        selected_aging_filter = None
         if not df_aging.empty:
           fig = px.bar(
               df_aging,
@@ -533,7 +533,24 @@ try:
               font=dict(color="#CCCCCC"),
               height=350,
           )
-          st.plotly_chart(fig, use_container_width=True)
+
+          chart_event = st.plotly_chart(
+              fig, use_container_width=True, on_select="rerun", key="aging_bar_chart"
+          )
+          if chart_event and "selection" in chart_event:
+            sel_points = chart_event["selection"].get("points", [])
+            if sel_points:
+              selected_aging_filter = sel_points[0].get("x")
+              st.info(
+                  f"📌 Filter Aktif dari Grafik (Klik Batang): **Aging = {selected_aging_filter}**"
+              )
+
+        # Filter tambahan berdasarkan klik batang grafik
+        aging_click_clause = (
+            f"AND aging_group = '{selected_aging_filter}'"
+            if selected_aging_filter
+            else ""
+        )
 
         st.markdown("---")
 
@@ -560,17 +577,15 @@ try:
           else:
             st.info("Tidak ada data untuk matriks.")
 
-        # --- TABEL KHUSUS UNRUNSHEET DENGAN LAST_LOCATION, CABANG, ZONA, KECAMATAN ---
         with st.expander(
-            "🗂️ Unrunsheet By Last Location, Cabang, Zona, Kecamatan (Klik"
-            " untuk Buka/Tutup)",
+            "🗂️ Unrunsheet By Last Location, Cabang, Zona, Kecamatan (Klik untuk Buka/Tutup)",
             expanded=True,
         ):
           pivot_loc = run_query(f"""
                         PIVOT (
                             SELECT LAST_LOCATION, Cabang, Zona, Kecamatan, aging_group, AWB 
                             FROM v_inbound
-                            {where_sql} {unrunsheet_status_clause}
+                            {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         )
                         ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
                         USING COUNT(DISTINCT AWB)
@@ -599,7 +614,7 @@ try:
         ):
           df_detail = run_query(f"""
                         SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
-                        FROM v_inbound {where_sql} {unrunsheet_status_clause}
+                        FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         ORDER BY age_days DESC
                         LIMIT 300
                     """)
@@ -751,7 +766,6 @@ try:
         st.markdown("---")
         st.subheader("📈 Total Inbound Per Tanggal (Tahun 2026)")
 
-        # Grafik Trend Inbound menggunakan where_sql_trend (Bebas dari Filter Shipment Status)
         df_inbound_trend = run_query(f"""
                     SELECT 
                         STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b') AS periode,
@@ -899,8 +913,7 @@ try:
           )
 
         with st.expander(
-            "📊 2. Matrix Infografis UnRunsheet Per Cabang (Klik untuk"
-            " Buka/Tutup)",
+            "📊 2. Matrix Infografis UnRunsheet Per Cabang (Klik untuk Buka/Tutup)",
             expanded=False,
         ):
           df_unrun = run_query(f"""
@@ -911,15 +924,13 @@ try:
                     """)
           render_plotly_table_matrix(
               df_unrun,
-              "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging"
-              " Last_Inbound)",
+              "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)",
               "Matrix_UnRunsheet_Cabang.csv",
               "📥 Download Data Matrix UnRunsheet (CSV)",
           )
 
         with st.expander(
-            "📊 3. Matrix Infografis Success UnHRS Per Cabang (Klik untuk"
-            " Buka/Tutup)",
+            "📊 3. Matrix Infografis Success UnHRS Per Cabang (Klik untuk Buka/Tutup)",
             expanded=False,
         ):
           df_succ = run_query(f"""
@@ -937,8 +948,7 @@ try:
           )
 
         with st.expander(
-            "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Klik untuk"
-            " Buka/Tutup)",
+            "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Klik untuk Buka/Tutup)",
             expanded=False,
         ):
           df_undel = run_query(f"""
@@ -957,8 +967,7 @@ try:
 
     else:
       st.warning(
-          "🔐 Masukkan password 'Summary Exec' yang benar di sidebar kiri untuk"
-          " melihat halaman ini."
+          "🔐 Masukkan password 'Summary Exec' yang benar di sidebar kiri untuk melihat halaman ini."
       )
 
 except Exception as main_err:
