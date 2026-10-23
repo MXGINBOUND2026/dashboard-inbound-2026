@@ -667,7 +667,7 @@ try:
                 c for c in ["H+2", "H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"] if c in pivot_loc.columns
             ]
 
-            styled_pivot = pivot_loc.style.applymap(
+            styled_pivot = pivot_loc.style.map(
                 highlight_red_alert, subset=red_alert_cols
             )
 
