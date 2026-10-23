@@ -519,7 +519,6 @@ try:
                     GROUP BY 1 ORDER BY CASE aging_group WHEN 'H+0' THEN 0 WHEN 'H+1' THEN 1 WHEN 'H+2' THEN 2 WHEN 'H+3' THEN 3 WHEN 'H+4' THEN 4 WHEN 'H+5' THEN 5 WHEN 'H+6' THEN 6 WHEN 'H+7' THEN 7 WHEN '>H+7' THEN 8 END
                 """)
 
-        # --- TOMBOL FILTER KATEGORI AGING BERBENTUK CARD DI ATAS GRAFIK ---
         st.markdown(
             "📌 **Pilih Filter Kategori Aging (Klik Card untuk Memfilter):**"
         )
@@ -532,7 +531,6 @@ try:
 
         for idx, ag in enumerate(AGING_ORDER):
           with card_cols[idx + 1]:
-            # Cek jumlah AWB untuk card ini
             match_row = (
                 df_aging[df_aging["aging_group"] == ag]["total_awb"].values
                 if not df_aging.empty
@@ -540,7 +538,9 @@ try:
             )
             vol_ag = int(match_row[0]) if len(match_row) > 0 else 0
             is_selected = st.session_state.selected_aging_card == ag
-            btn_label = f"✨ {ag}\n({vol_ag:,})" if is_selected else f"{ag}\n({vol_ag:,})"
+            btn_label = (
+                f"✨ {ag}\n({vol_ag:,})" if is_selected else f"{ag}\n({vol_ag:,})"
+            )
             if st.button(
                 btn_label, key=f"card_ag_{ag}", use_container_width=True
             ):
@@ -550,7 +550,8 @@ try:
         selected_aging_filter = st.session_state.selected_aging_card
         if selected_aging_filter:
           st.info(
-              f"📌 Filter Aktif: **Aging = {selected_aging_filter}** (Tabel di bawah terfilter otomatis)"
+              f"📌 Filter Aktif: **Aging = {selected_aging_filter}** (Tabel di"
+              " bawah terfilter otomatis)"
           )
 
         if not df_aging.empty:
@@ -601,7 +602,8 @@ try:
             st.info("Tidak ada data untuk matriks.")
 
         with st.expander(
-            "🗂️ Unrunsheet By Last Location, Cabang, Zona, Kecamatan (Klik untuk Buka/Tutup)",
+            "🗂️ Unrunsheet By Last Location, Cabang, Zona, Kecamatan (Klik"
+            " untuk Buka/Tutup)",
             expanded=True,
         ):
           pivot_loc = run_query(f"""
@@ -624,7 +626,8 @@ try:
             pivot_loc["Grand Total"] = pivot_loc[num_cols].sum(axis=1)
             st.dataframe(pivot_loc, use_container_width=True)
             st.download_button(
-                "📥 Download CSV Unrunsheet Hirarki (Lokasi, Cabang, Zona, Kecamatan)",
+                "📥 Download CSV Unrunsheet Hirarki (Lokasi, Cabang, Zona,"
+                " Kecamatan)",
                 pivot_loc.to_csv(index=False).encode("utf-8"),
                 file_name="Unrunsheet_Hirarki_Lokasi.csv",
                 mime="text/csv",
@@ -787,16 +790,49 @@ try:
           )
 
         st.markdown("---")
-        st.subheader("📈 Total Inbound Per Tanggal (Tahun 2026)")
+
+        # =========================================================
+        # PILIH TAMPILAN GRAFIK: HARI, WEEK, BULAN
+        # =========================================================
+        c_tr_1, c_tr_2 = st.columns([2, 2])
+        with c_tr_1:
+          st.subheader("📈 Total Inbound Tren (Tahun 2026)")
+        with c_tr_2:
+          trend_view_mode = st.selectbox(
+              "📅 Agregasi Tampilan Grafik:",
+              ["Harian (Daily)", "Mingguan (Weekly)", "Bulanan (Monthly)"],
+              index=0,
+              label_visibility="collapsed",
+          )
+
+        if trend_view_mode == "Harian (Daily)":
+          sql_trend_group = """
+                        STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b') AS periode,
+                        MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
+                    """
+          group_by_clause = "GROUP BY 1 ORDER BY sort_key ASC"
+        elif trend_view_mode == "Mingguan (Weekly)":
+          sql_trend_group = """
+                        CONCAT('Week ', CAST(pod_week_num AS STRING)) AS periode,
+                        MIN(pod_week_num) as sort_key
+                    """
+          group_by_clause = (
+              "AND pod_week_num IS NOT NULL GROUP BY 1 ORDER BY sort_key ASC"
+          )
+        else:
+          sql_trend_group = """
+                        STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%b %Y') AS periode,
+                        MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
+                    """
+          group_by_clause = "GROUP BY 1 ORDER BY sort_key ASC"
 
         df_inbound_trend = run_query(f"""
                     SELECT 
-                        STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%d %b') AS periode,
-                        COUNT(DISTINCT AWB) AS total_awb,
-                        MIN(CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)) as sort_key
+                        {sql_trend_group},
+                        COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound
                     {where_sql_trend} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
-                    GROUP BY 1 ORDER BY sort_key ASC
+                    {group_by_clause}
                 """)
 
         if not df_inbound_trend.empty:
@@ -814,6 +850,69 @@ try:
               height=330,
           )
           st.plotly_chart(fig_inbound, use_container_width=True)
+
+        # =========================================================
+        # TABEL PRODUKTIVITAS PER CABANG DENGAN GAP & INDIKATOR
+        # =========================================================
+        st.markdown("---")
+        st.subheader("📋 Tabel Produktivitas Per Cabang (Gap & Growth)")
+
+        df_prod = run_query(f"""
+                    SELECT 
+                        Cabang,
+                        COUNT(DISTINCT AWB) AS total_awb
+                    FROM v_inbound {where_sql_trend} AND Cabang IS NOT NULL AND Cabang != '-'
+                    GROUP BY Cabang
+                    ORDER BY total_awb DESC
+                """)
+
+        if not df_prod.empty:
+          # Hitung Difference from Before (Gap & % Growth)
+          df_prod["Previous Period"] = df_prod["total_awb"].shift(1).fillna(0)
+          df_prod["Gap"] = (
+              df_prod["total_awb"] - df_prod["Previous Period"]
+          ).astype(int)
+          df_prod["% Growth"] = (
+              (df_prod["Gap"] / df_prod["Previous Period"] * 100.0)
+              .fillna(0.0)
+              .round(2)
+          )
+
+          def get_indicator(val):
+            if val > 0:
+              return "📈 Naik"
+            elif val < 0:
+              return "📉 Turun"
+            else:
+              return "➖ Flat"
+
+          df_prod["Status"] = df_prod["Gap"].apply(get_indicator)
+          df_prod = df_prod[
+              [
+                  "Cabang",
+                  "total_awb",
+                  "Previous Period",
+                  "Gap",
+                  "% Growth",
+                  "Status",
+              ]
+          ]
+          df_prod.columns = [
+              "Cabang",
+              "Total AWB",
+              "Periode Sebelumnya",
+              "Gap (Selisih)",
+              "% Growth",
+              "Indikator",
+          ]
+
+          st.dataframe(df_prod, use_container_width=True)
+          st.download_button(
+              "📥 Download CSV Produktivitas Cabang",
+              df_prod.to_csv(index=False).encode("utf-8"),
+              file_name="Produktivitas_Cabang_Gap.csv",
+              mime="text/csv",
+          )
 
         st.markdown("---")
 
@@ -936,7 +1035,8 @@ try:
           )
 
         with st.expander(
-            "📊 2. Matrix Infografis UnRunsheet Per Cabang (Klik untuk Buka/Tutup)",
+            "📊 2. Matrix Infografis UnRunsheet Per Cabang (Klik untuk"
+            " Buka/Tutup)",
             expanded=False,
         ):
           df_unrun = run_query(f"""
@@ -947,13 +1047,15 @@ try:
                     """)
           render_plotly_table_matrix(
               df_unrun,
-              "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging Last_Inbound)",
+              "📊 2. Matrix Infografis UnRunsheet Per Cabang (Aging"
+              " Last_Inbound)",
               "Matrix_UnRunsheet_Cabang.csv",
               "📥 Download Data Matrix UnRunsheet (CSV)",
           )
 
         with st.expander(
-            "📊 3. Matrix Infografis Success UnHRS Per Cabang (Klik untuk Buka/Tutup)",
+            "📊 3. Matrix Infografis Success UnHRS Per Cabang (Klik untuk"
+            " Buka/Tutup)",
             expanded=False,
         ):
           df_succ = run_query(f"""
@@ -971,7 +1073,8 @@ try:
           )
 
         with st.expander(
-            "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Klik untuk Buka/Tutup)",
+            "📊 4. Matrix Infografis Undel UnHRS Per Cabang (Klik untuk"
+            " Buka/Tutup)",
             expanded=False,
         ):
           df_undel = run_query(f"""
@@ -990,7 +1093,8 @@ try:
 
     else:
       st.warning(
-          "🔐 Masukkan password 'Summary Exec' yang benar di sidebar kiri untuk melihat halaman ini."
+          "🔐 Masukkan password 'Summary Exec' yang benar di sidebar kiri untuk"
+          " melihat halaman ini."
       )
 
 except Exception as main_err:
