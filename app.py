@@ -241,7 +241,10 @@ try:
   unique_cabang = [
       c
       for c in unique_cabang_db
-      if any(allowed.lower() == str(c).strip().lower() for allowed in allowed_cabang_list)
+      if any(
+          allowed.lower() == str(c).strip().lower()
+          for allowed in allowed_cabang_list
+      )
   ]
 
   default_start = (
@@ -809,8 +812,6 @@ try:
                         {sql_period_expr} as sort_key
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
-          label_curr = "Hari Ini (Terbaru)"
-          label_prev = "Hari Sebelumnya"
         elif trend_view_mode == "Mingguan (Weekly)":
           sql_period_expr = "pod_week_num"
           sql_trend_group = """
@@ -820,8 +821,6 @@ try:
           group_by_clause = (
               "AND pod_week_num IS NOT NULL GROUP BY 1, 2 ORDER BY sort_key ASC"
           )
-          label_curr = "Week Terbaru"
-          label_prev = "Week Sebelumnya"
         else:
           sql_period_expr = "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%Y-%m')"
           sql_trend_group = f"""
@@ -829,8 +828,6 @@ try:
                         {sql_period_expr} as sort_key
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
-          label_curr = "Bulan Terbaru"
-          label_prev = "Bulan Sebelumnya"
 
         # Query Trend Inbound
         df_inbound_trend = run_query(f"""
@@ -859,79 +856,77 @@ try:
           st.plotly_chart(fig_inbound, use_container_width=True)
 
         # =========================================================
-        # TABEL PRODUKTIVITAS PER CABANG DENGAN GAP PERIODE SEBELUMNYA
+        # TABEL PRODUKTIVITAS PER CABANG (PIVOT MEMANJANG KE KANAN)
         # =========================================================
         st.markdown("---")
-        st.subheader("📋 Tabel Produktivitas Per Cabang (Gap & Growth Antar Periode)")
+        st.subheader("📋 Tabel Produktivitas Per Cabang (Memanjang ke Kanan)")
 
-        # Query per cabang dan periode untuk mendapatkan 2 periode terakhir
-        df_cabang_periods = run_query(f"""
+        # Query data cabang dikelompokkan berdasarkan Cabang dan Periode (sesuai grafik)
+        df_pivot_raw = run_query(f"""
                     SELECT 
                         Cabang,
-                        {sql_period_expr} AS period_id,
+                        {sql_trend_group},
                         COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound 
                     {where_sql_trend} 
                       AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
                       AND {sql_period_expr} IS NOT NULL
-                    GROUP BY Cabang, period_id
-                    ORDER BY period_id DESC
+                      AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                    GROUP BY Cabang, periode, sort_key
+                    ORDER BY sort_key ASC
                 """)
 
-        if not df_cabang_periods.empty:
-          periods = sorted(df_cabang_periods["period_id"].unique())
-          latest_p = periods[-1] if len(periods) >= 1 else None
-          prev_p = periods[-2] if len(periods) >= 2 else None
+        if not df_pivot_raw.empty:
+          # Dapatkan list urutan periode berdasarkan sort_key
+          periods_ordered = (
+              df_pivot_raw[["periode", "sort_key"]]
+              .drop_duplicates()
+              .sort_values("sort_key")["periode"]
+              .tolist()
+          )
+          main_cabangs = [
+              "Malang",
+              "Blitar",
+              "Batu",
+              "Kepanjen",
+              "Turen",
+              "Bululawang",
+          ]
 
-          # Filter data cabang untuk 6 cabang utama
-          main_cabangs = ["Malang", "Blitar", "Batu", "Kepanjen", "Turen", "Bululawang"]
-          prod_rows = []
-
+          # Buat struktur tabel pivot untuk menampung AWB dan % Growth per periode
+          pivot_data = []
           for cab in main_cabangs:
-            curr_val = (
-                df_cabang_periods[
-                    (df_cabang_periods["Cabang"] == cab)
-                    & (df_cabang_periods["period_id"] == latest_p)
-                ]["total_awb"].values
-            )
-            prev_val = (
-                df_cabang_periods[
-                    (df_cabang_periods["Cabang"] == cab)
-                    & (df_cabang_periods["period_id"] == prev_p)
-                ]["total_awb"].values
-            ) if prev_p else [0]
+            row_dict = {"Cabang": cab}
+            cab_data = df_pivot_raw[df_pivot_raw["Cabang"] == cab]
 
-            c_awb = int(curr_val[0]) if len(curr_val) > 0 else 0
-            p_awb = int(prev_val[0]) if len(prev_val) > 0 else 0
-            gap = c_awb - p_awb
-            growth = (gap / p_awb * 100.0) if p_awb > 0 else 0.0
+            prev_val = None
+            for p in periods_ordered:
+              val_match = cab_data[cab_data["periode"] == p]["total_awb"].values
+              curr_val = int(val_match[0]) if len(val_match) > 0 else 0
 
-            if gap > 0:
-              status = "📈 Naik"
-            elif gap < 0:
-              status = "📉 Turun"
-            else:
-              status = "➖ Flat"
+              row_dict[f"{p} - AWB"] = curr_val
 
-            prod_rows.append({
-                "Cabang": cab,
-                f"Total AWB ({label_curr})": c_awb,
-                f"{label_prev}": p_awb,
-                "Gap (Selisih)": gap,
-                "% Growth": round(growth, 2),
-                "Indikator": status,
-            })
+              if prev_val is not None and prev_val > 0:
+                growth = ((curr_val - prev_val) / prev_val) * 100.0
+                row_dict[f"{p} - % Growth"] = f"{growth:+.2f}%"
+              else:
+                row_dict[f"{p} - % Growth"] = "0.00%"
 
-          df_prod = pd.DataFrame(prod_rows)
-          st.dataframe(df_prod, use_container_width=True)
+              prev_val = curr_val if curr_val > 0 else prev_val
+
+            pivot_data.append(row_dict)
+
+          df_final_pivot = pd.DataFrame(pivot_data)
+          st.dataframe(df_final_pivot, use_container_width=True)
+
           st.download_button(
-              "📥 Download CSV Produktivitas Cabang",
-              df_prod.to_csv(index=False).encode("utf-8"),
-              file_name="Produktivitas_Cabang_Gap.csv",
+              "📥 Download CSV Produktivitas Cabang (Pivot)",
+              df_final_pivot.to_csv(index=False).encode("utf-8"),
+              file_name="Produktivitas_Cabang_Pivot.csv",
               mime="text/csv",
           )
         else:
-          st.info("Tidak ada data cabang untuk periode yang dipilih.")
+          st.info("Tidak ada data untuk rentang waktu dan cabang tersebut.")
 
         st.markdown("---")
 
