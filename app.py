@@ -382,6 +382,8 @@ try:
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnInbound' THEN AWB END) AS total_uninbound,
                     COUNT(DISTINCT CASE WHEN Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') THEN AWB END) AS total_unrunsheet,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') THEN AWB END) AS total_success,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment = 'SUCCESS RETURN SHIPPER' THEN AWB END) AS total_return,
                     COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) AS total_success_unhrs,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) AS total_undel_unhrs
                 FROM v_inbound {where_sql}
@@ -391,8 +393,19 @@ try:
       total_uninbound = metrics_res["total_uninbound"][0] or 0
       total_unrunsheet = metrics_res["total_unrunsheet"][0] or 0
       total_unrunsheet_pra = metrics_res["total_unrunsheet_pra"][0] or 0
+      total_success = metrics_res["total_success"][0] or 0
+      total_return = metrics_res["total_return"][0] or 0
       total_success_unhrs = metrics_res["total_success_unhrs"][0] or 0
       total_undel_unhrs = metrics_res["total_undel_unhrs"][0] or 0
+
+      # Kalkulasi Persentase
+      success_rate = (
+          (total_success / total_awb * 100.0) if total_awb > 0 else 0.0
+      )
+      return_rate = (total_return / total_awb * 100.0) if total_awb > 0 else 0.0
+      unrunsheet_rate = (
+          (total_unrunsheet / total_awb * 100.0) if total_awb > 0 else 0.0
+      )
 
       # CSS Styling khusus untuk Card Metric di Main Dashboard
       st.markdown(
@@ -413,7 +426,14 @@ try:
 
       c1, c2, c3, c4 = st.columns(4)
       with c1:
-        st.metric(label="📦 Total AWB", value=f"{total_awb:,}")
+        st.metric(
+            label="📦 Total AWB",
+            value=f"{total_awb:,}",
+            delta=(
+                f"Success: {success_rate:.2f}% | Return: {return_rate:.2f}%"
+            ),
+            delta_color="normal",
+        )
       with c2:
         st.metric(label="⚠️ Total UnInbound", value=f"{total_uninbound:,}")
         if st.button(
@@ -426,7 +446,10 @@ try:
           st.rerun()
       with c3:
         st.metric(
-            label="🚨 Alert: Total UnRunsheet", value=f"{total_unrunsheet:,}"
+            label="🚨 Alert: Total UnRunsheet",
+            value=f"{total_unrunsheet:,}",
+            delta=f"{unrunsheet_rate:.2f}% dari Total AWB",
+            delta_color="inverse",
         )
         if st.button(
             "👉 Lihat Data UnRunsheet",
@@ -681,7 +704,17 @@ try:
               return "color: #888888;"
 
             red_alert_cols = [
-                c for c in ["H+2", "H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"] if c in pivot_loc.columns
+                c
+                for c in [
+                    "H+2",
+                    "H+3",
+                    "H+4",
+                    "H+5",
+                    "H+6",
+                    "H+7",
+                    ">H+7",
+                ]
+                if c in pivot_loc.columns
             ]
 
             styled_pivot = pivot_loc.style.map(
@@ -1156,7 +1189,7 @@ try:
                   text=f"<b>{title_text}</b>",
                   x=0,
                   xanchor="left",
-                  font=dict(size=16),  # Warna otomatis mengikuti tema Streamlit (terang/gelap)
+                  font=dict(size=16),
               ),
               margin=dict(l=10, r=10, t=50, b=10),
               paper_bgcolor="rgba(0,0,0,0)",
