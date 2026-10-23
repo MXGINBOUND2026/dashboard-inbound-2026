@@ -804,18 +804,42 @@ try:
               label_visibility="collapsed",
           )
 
-        # Menggunakan Last_Inbound sebagai acuan waktu utama
+        # ---------------------------------------------------------
+        # WIDGET FILTER RENTANG TANGGAL (DAY RANGE 1-31)
+        # ---------------------------------------------------------
+        enable_day_filter = st.checkbox(
+            "📌 Aktifkan Filter Rentang Tanggal (Day Range 1–31)", value=False
+        )
+        if enable_day_filter:
+          col_d1, col_d2 = st.columns(2)
+          with col_d1:
+            start_day_val = st.number_input(
+                "Dari Tanggal:", min_value=1, max_value=31, value=1
+            )
+          with col_d2:
+            end_day_val = st.number_input(
+                "Sampai Tanggal:", min_value=1, max_value=31, value=31
+            )
+          if start_day_val > end_day_val:
+            st.warning(
+                "⚠️ Tanggal awal tidak boleh lebih besar dari tanggal akhir."
+            )
+            day_filter_clause = ""
+          else:
+            day_filter_clause = f"AND EXTRACT(DAY FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) BETWEEN {start_day_val} AND {end_day_val}"
+        else:
+          day_filter_clause = ""
+
         sql_date_expr = "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')"
 
         if trend_view_mode == "Harian (Daily)":
           sql_period_expr = f"CAST({sql_date_expr} AS DATE)"
           sql_trend_group = f"""
-                        STRFTIME({sql_period_expr}, '%d %b %Y') AS periode,
+                        STRFTIME({sql_date_expr}, '%d %b %Y') AS periode,
                         {sql_period_expr} as sort_key
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
         elif trend_view_mode == "Mingguan (Weekly)":
-          # Mengambil nomor minggu dari Last_Inbound
           sql_period_expr = f"EXTRACT(WEEK FROM {sql_date_expr})"
           sql_trend_group = f"""
                         CONCAT('Week ', CAST(CAST({sql_period_expr} AS INTEGER) AS STRING)) AS periode,
@@ -833,13 +857,13 @@ try:
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
 
-        # Query Trend Inbound
+        # Query Trend Inbound dengan tambahan day_filter_clause
         df_inbound_trend = run_query(f"""
                     SELECT 
                         {sql_trend_group},
                         COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound
-                    {where_sql_trend} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                    {where_sql_trend} AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026 {day_filter_clause}
                     {group_by_clause}
                 """)
 
@@ -859,7 +883,7 @@ try:
           )
           st.plotly_chart(fig_inbound, use_container_width=True)
 
-    # =========================================================
+        # =========================================================
         # TABEL PRODUKTIVITAS PER CABANG (PIVOT MEMANJANG KE KANAN)
         # =========================================================
         st.markdown("---")
@@ -874,7 +898,7 @@ try:
                     {where_sql_trend} 
                       AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
                       AND {sql_period_expr} IS NOT NULL
-                      AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026
+                      AND EXTRACT(YEAR FROM COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END)) = 2026 {day_filter_clause}
                     GROUP BY Cabang, period_raw
                     ORDER BY period_raw ASC
                 """)
@@ -916,7 +940,6 @@ try:
               match_val = cab_df[cab_df["periode"] == p]["total_awb"].values
               curr_val = int(match_val[0]) if len(match_val) > 0 else 0
 
-              # Pisahkan kolom agar Streamlit dataframe dapat merender dengan stabil
               row_dict[f"{p} (AWB)"] = curr_val
 
               if prev_val is not None and prev_val > 0:
@@ -931,7 +954,6 @@ try:
 
           df_final_pivot = pd.DataFrame(pivot_data)
 
-          # Tampilkan menggunakan st.altair_chart / st.dataframe dengan penyesuaian lebar
           st.dataframe(df_final_pivot, use_container_width=True, height=280)
 
           st.download_button(
