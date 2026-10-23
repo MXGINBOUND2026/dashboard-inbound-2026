@@ -792,7 +792,7 @@ try:
         st.markdown("---")
 
         # =========================================================
-        # PILIH TAMPILAN GRAFIK & AGREGASI PERIODE
+        # PILIH TAMPILAN GRAFIK & AGREGASI PERIODE (MENGGUNAKAN Last_Inbound)
         # =========================================================
         c_tr_1, c_tr_2 = st.columns([2, 2])
         with c_tr_1:
@@ -805,26 +805,31 @@ try:
               label_visibility="collapsed",
           )
 
+        # Menggunakan Last_Inbound sebagai acuan waktu utama
+        sql_date_expr = "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')"
+
         if trend_view_mode == "Harian (Daily)":
-          sql_period_expr = "CAST(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END) AS DATE)"
+          sql_period_expr = f"CAST({sql_date_expr} AS DATE)"
           sql_trend_group = f"""
                         STRFTIME({sql_period_expr}, '%d %b %Y') AS periode,
                         {sql_period_expr} as sort_key
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
         elif trend_view_mode == "Mingguan (Weekly)":
-          sql_period_expr = "pod_week_num"
-          sql_trend_group = """
-                        CONCAT('Week ', CAST(pod_week_num AS STRING)) AS periode,
-                        pod_week_num as sort_key
-                    """
-          group_by_clause = (
-              "AND pod_week_num IS NOT NULL GROUP BY 1, 2 ORDER BY sort_key ASC"
-          )
-        else:
-          sql_period_expr = "STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%Y-%m')"
+          # Mengambil nomor minggu dari Last_Inbound
+          sql_period_expr = f"EXTRACT(WEEK FROM {sql_date_expr})"
           sql_trend_group = f"""
-                        STRFTIME(COALESCE(dt_im, CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END), '%b %Y') AS periode,
+                        CONCAT('Week ', CAST(CAST({sql_period_expr} AS INTEGER) AS STRING)) AS periode,
+                        {sql_period_expr} as sort_key
+                    """
+          group_by_clause = f"""
+                        AND {sql_date_expr} IS NOT NULL 
+                        GROUP BY 1, 2 ORDER BY sort_key ASC
+                    """
+        else:
+          sql_period_expr = f"STRFTIME({sql_date_expr}, '%Y-%m')"
+          sql_trend_group = f"""
+                        STRFTIME({sql_date_expr}, '%b %Y') AS periode,
                         {sql_period_expr} as sort_key
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
