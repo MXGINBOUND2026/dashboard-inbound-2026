@@ -213,7 +213,7 @@ try:
         .tolist()
     )
     minmax = con.execute("""
-            SELECT MIN(TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M')), MAX(TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M')) 
+            SELECT MIN(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')), MAX(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) 
             FROM v_inbound WHERE Last_Inbound IS NOT NULL AND Last_Inbound != '-'
         """).fetchdf()
     con.close()
@@ -260,11 +260,11 @@ try:
 
   with st.sidebar.form("filter_form"):
     date_range = st.date_input(
-        "📅 Filter Rentang Tanggal (2026):",
+        "📅 Filter Rentang Tanggal (Kosongkan untuk Semua Data):",
         value=(),
-        min_value=datetime.date(2026, 1, 1),
-        max_value=datetime.date(2026, 12, 31),
-        help="Kosongkan nilai ini jika ingin menampilkan seluruh data 2026",
+        min_value=default_start,
+        max_value=default_end,
+        help="Kosongkan nilai ini jika ingin menampilkan seluruh data termasuk yang tanpa tanggal (UnInbound)",
     )
 
     chosen_loc = st.multiselect("🔍 Filter Last Location:", unique_locations)
@@ -296,7 +296,7 @@ try:
   if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
     where_clauses_general.append(
-        f"CAST(TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M') AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
+        f"CAST(TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') AS DATE) BETWEEN '{start_d}' AND '{end_d}'"
     )
 
   if chosen_loc:
@@ -335,7 +335,7 @@ try:
   with tab1:
     with st.spinner("⏳ Memuat Main Dashboard..."):
       max_date_df = run_query("""
-                SELECT MAX(TRY_STRPTIME(TGL_TARIK_REPORT, '%d/%m/%Y %H:%M')) as max_dt FROM v_inbound
+                SELECT MAX(TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M')) as max_dt FROM v_inbound
             """)
       max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
       formatted_date = (
@@ -398,6 +398,7 @@ try:
       total_success_unhrs = metrics_res["total_success_unhrs"][0] or 0
       total_undel_unhrs = metrics_res["total_undel_unhrs"][0] or 0
 
+      # Kalkulasi Persentase
       success_rate = (
           (total_success / total_awb * 100.0) if total_awb > 0 else 0.0
       )
@@ -406,6 +407,7 @@ try:
           (total_unrunsheet / total_awb * 100.0) if total_awb > 0 else 0.0
       )
 
+      # CSS Styling khusus untuk Card Metric di Main Dashboard
       st.markdown(
           """
         <style>
@@ -517,11 +519,13 @@ try:
           else:
             card_query_filter = "1=1"
 
+          # Tampilan dibatasi 200 baris untuk layar
           df_card_detail_display = run_query(f"""
                         SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
                         ORDER BY age_days DESC LIMIT 200
                     """)
+          # Data penuh untuk download
           df_card_detail_full = run_query(f"""
                         SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
@@ -693,6 +697,7 @@ try:
 
             pivot_loc["Grand Total"] = pivot_loc[AGING_ORDER].sum(axis=1)
 
+            # Fungsi Styler untuk memberikan warna merah pada font H+2 sampai >H+7 jika nilainya > 0
             def highlight_red_alert(val):
               if isinstance(val, (int, float)) and val > 0:
                 return "color: #ff4d4d; font-weight: bold;"
@@ -716,6 +721,7 @@ try:
                 highlight_red_alert, subset=red_alert_cols
             )
 
+            # Menggunakan st.dataframe dengan Pandas Styler (bebas sort + font merah aktif)
             st.dataframe(styled_pivot, use_container_width=True)
 
             st.download_button(
@@ -906,6 +912,9 @@ try:
 
         st.markdown("---")
 
+        # =========================================================
+        # PILIH TAMPILAN GRAFIK & AGREGASI PERIODE (MENGGUNAKAN Last_Inbound)
+        # =========================================================
         c_tr_1, c_tr_2 = st.columns([2, 2])
         with c_tr_1:
           st.subheader("📈 Total Inbound Tren (Tahun 2026)")
@@ -917,6 +926,9 @@ try:
               label_visibility="collapsed",
           )
 
+        # ---------------------------------------------------------
+        # WIDGET FILTER RENTANG TANGGAL (DAY RANGE 1-31)
+        # ---------------------------------------------------------
         enable_day_filter = st.checkbox(
             "📌 Aktifkan Filter Rentang Tanggal (Day Range 1–31)", value=False
         )
@@ -936,11 +948,11 @@ try:
             )
             day_filter_clause = ""
           else:
-            day_filter_clause = f"AND EXTRACT(DAY FROM TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M')) BETWEEN {start_day_val} AND {end_day_val}"
+            day_filter_clause = f"AND EXTRACT(DAY FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) BETWEEN {start_day_val} AND {end_day_val}"
         else:
           day_filter_clause = ""
 
-        sql_date_expr = "TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M')"
+        sql_date_expr = "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')"
 
         if trend_view_mode == "Harian (Daily)":
           sql_period_expr = f"CAST({sql_date_expr} AS DATE)"
@@ -967,13 +979,14 @@ try:
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
 
+        # Query Trend Inbound menggunakan Last_Inbound sebagai acuan tahun
         df_inbound_trend = run_query(f"""
                     SELECT 
                         {sql_trend_group},
                         COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound
                     {where_sql_trend} 
-                      AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M')) = 2026 {day_filter_clause}
+                      AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = 2026 {day_filter_clause}
                     {group_by_clause}
                 """)
 
@@ -993,6 +1006,9 @@ try:
           )
           st.plotly_chart(fig_inbound, use_container_width=True)
 
+        # =========================================================
+        # TABEL PRODUKTIVITAS PER CABANG (PIVOT MEMANJANG KE KANAN)
+        # =========================================================
         st.markdown("---")
         st.subheader("📋 Tabel Produktivitas")
 
@@ -1005,7 +1021,7 @@ try:
                     {where_sql_trend} 
                       AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
                       AND {sql_period_expr} IS NOT NULL
-                      AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%d/%m/%Y %H:%M')) = 2026 {day_filter_clause}
+                      AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = 2026 {day_filter_clause}
                     GROUP BY Cabang, period_raw
                     ORDER BY period_raw ASC
                 """)
