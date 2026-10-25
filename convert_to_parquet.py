@@ -165,7 +165,10 @@ df_user_id = (
 if not df_user_id.empty:
   df_user_id.columns = df_user_id.columns.str.strip()
 
-print("\n4. Menjalankan kalkulasi komprehensif di DuckDB...")
+print(
+    "\n4. Menjalankan kalkulasi komprehensif di DuckDB (Filter Khusus Tahun"
+    " 2026)..."
+)
 con = duckdb.connect()
 con.execute("PRAGMA memory_limit='4GB';")
 
@@ -194,16 +197,66 @@ query_duckdb = f"""
         ),
         parsed AS (
             SELECT *,
-                COALESCE(TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_im,
-                COALESCE(TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVO_DATE AS TIMESTAMP)) AS dt_hvo,
-                COALESCE(TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(HVI_DATE AS TIMESTAMP)) AS dt_hvi,
-                COALESCE(TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mti,
-                COALESCE(TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)) AS dt_mts,
-                COALESCE(TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)) AS dt_tm,
-                COALESCE(TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)) AS dt_run,
-                COALESCE(TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)) AS dt_ob,
-                COALESCE(TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M'), TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d-%b-%Y %H:%M'), TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%Y-%m-%d %H:%M'), TRY_CAST(TGL_UPDATE_STATUS_POD AS TIMESTAMP)) AS dt_update_pod,
-                COALESCE(TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %H:%M'), TRY_STRPTIME(WUS_DATE, '%d-%b-%Y %H:%M'), TRY_STRPTIME(WUS_DATE, '%Y-%m-%d %H:%M'), TRY_CAST(WUS_DATE AS TIMESTAMP)) AS dt_wus,
+                COALESCE(
+                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
+                ) AS dt_im,
+                COALESCE(
+                    TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(HVO_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(HVO_DATE AS TIMESTAMP)
+                ) AS dt_hvo,
+                COALESCE(
+                    TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(HVI_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(HVI_DATE AS TIMESTAMP)
+                ) AS dt_hvi,
+                COALESCE(
+                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
+                ) AS dt_mti,
+                COALESCE(
+                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)
+                ) AS dt_mts,
+                COALESCE(
+                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)
+                ) AS dt_tm,
+                COALESCE(
+                    TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(DATE_RUNSHEET, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)
+                ) AS dt_run,
+                COALESCE(
+                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)
+                ) AS dt_ob,
+                COALESCE(
+                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(TGL_UPDATE_STATUS_POD AS TIMESTAMP)
+                ) AS dt_update_pod,
+                COALESCE(
+                    TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(WUS_DATE, '%Y-%m-%d %H:%M'), 
+                    TRY_CAST(WUS_DATE AS TIMESTAMP)
+                ) AS dt_wus,
                 CASE 
                     WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-') 
                          OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
@@ -290,9 +343,9 @@ query_duckdb = f"""
                 ELSE CAST(w.CODING AS VARCHAR)
             END AS CODING,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
-            COALESCE(STRFTIME(w.valid_inbound_date, '%m/%d/%Y %H:%M'), '-') AS Last_Inbound,
-            COALESCE(STRFTIME(w.dt_update_pod, '%m/%d/%Y %H:%M'), '-') AS TGL_UPDATE_STATUS_POD,
-            COALESCE(STRFTIME(w.dt_wus, '%m/%d/%Y %H:%M'), '-') AS WUS_DATE,
+            COALESCE(STRFTIME(w.valid_inbound_date, '%d/%m/%Y %H:%M'), '-') AS Last_Inbound,
+            COALESCE(STRFTIME(w.dt_update_pod, '%d/%m/%Y %H:%M'), '-') AS TGL_UPDATE_STATUS_POD,
+            COALESCE(STRFTIME(w.dt_wus, '%d/%m/%Y %H:%M'), '-') AS WUS_DATE,
             COALESCE(w.BILNOTE_AMOUNT, 0) AS BILNOTE_AMOUNT,
             COALESCE(w.RUNSHEET_COURIER_NAME, '-') AS RUNSHEET_COURIER_NAME,
             CASE WHEN w.BILNOTE_AMOUNT IS NOT NULL AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '' AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '0' THEN 'COD' ELSE 'Non COD' END AS payment_type,
@@ -357,7 +410,7 @@ query_duckdb = f"""
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 3 THEN 'H+3'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 4 THEN 'H+4'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 5 THEN 'H+5'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 6 THEN 'H+6'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 6 THEN 'H+6'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CURRENT_DATE) = 7 THEN 'H+7'
                         ELSE '>H+7'
                     END
@@ -382,12 +435,13 @@ query_duckdb = f"""
             w.TGL_TARIK_REPORT
         FROM processed w
         LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
-        WHERE w.Status_Shipment != 'AWB Cancel'
+        WHERE w.Status_Shipment != 'AWB Cancel' 
+          AND (EXTRACT(YEAR FROM w.valid_inbound_date) = 2026 OR EXTRACT(YEAR FROM w.valid_uninbound_date) = 2026 OR w.valid_inbound_date IS NULL)
     ) TO '{OUTPUT_PARQUET}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
 """
 
 con.execute(query_duckdb)
-print(f"✅ Selesai! File Parquet berhasil dibuat: {OUTPUT_PARQUET}")
+print(f"✅ Selesai! File Parquet khusus 2026 berhasil dibuat: {OUTPUT_PARQUET}")
 shutil.rmtree(TEMP_CSV_DIR)
 
 print("\n5. Memperbarui file Parquet di Google Drive...")
