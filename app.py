@@ -398,7 +398,6 @@ try:
       total_success_unhrs = metrics_res["total_success_unhrs"][0] or 0
       total_undel_unhrs = metrics_res["total_undel_unhrs"][0] or 0
 
-      # Kalkulasi Persentase
       success_rate = (
           (total_success / total_awb * 100.0) if total_awb > 0 else 0.0
       )
@@ -407,7 +406,6 @@ try:
           (total_unrunsheet / total_awb * 100.0) if total_awb > 0 else 0.0
       )
 
-      # CSS Styling khusus untuk Card Metric di Main Dashboard
       st.markdown(
           """
         <style>
@@ -519,13 +517,11 @@ try:
           else:
             card_query_filter = "1=1"
 
-          # Tampilan dibatasi 200 baris untuk layar
           df_card_detail_display = run_query(f"""
                         SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
                         ORDER BY age_days DESC LIMIT 200
                     """)
-          # Data penuh untuk download
           df_card_detail_full = run_query(f"""
                         SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
@@ -536,14 +532,13 @@ try:
                 df_card_detail_display, use_container_width=True, height=300
             )
             st.caption(
-                "ℹ️ Ditampilkan 200 baris teratas untuk performa. Gunakan tombol"
-                " di bawah untuk mengunduh seluruh data lengkap."
+                f"ℹ️ Ditampilkan 200 baris teratas di layar. Total keseluruhan data yang tersedia untuk diunduh: **{len(df_card_detail_full):,} AWB**."
             )
             c_dl, c_rst = st.columns([3, 1])
             with c_dl:
               st.download_button(
-                  f"📥 Download CSV Lengkap [{card_title}]",
-                  df_card_detail_full.to_csv(index=False).encode("utf-8"),
+                  label=f"📥 Download CSV Lengkap [{card_title}] ({len(df_card_detail_full):,} AWB)",
+                  data=df_card_detail_full.to_csv(index=False).encode("utf-8"),
                   file_name=f"Detail_{card_title}_Full.csv",
                   mime="text/csv",
               )
@@ -697,7 +692,6 @@ try:
 
             pivot_loc["Grand Total"] = pivot_loc[AGING_ORDER].sum(axis=1)
 
-            # Fungsi Styler untuk memberikan warna merah pada font H+2 sampai >H+7 jika nilainya > 0
             def highlight_red_alert(val):
               if isinstance(val, (int, float)) and val > 0:
                 return "color: #ff4d4d; font-weight: bold;"
@@ -721,7 +715,6 @@ try:
                 highlight_red_alert, subset=red_alert_cols
             )
 
-            # Menggunakan st.dataframe dengan Pandas Styler (bebas sort + font merah aktif)
             st.dataframe(styled_pivot, use_container_width=True)
 
             st.download_button(
@@ -750,12 +743,11 @@ try:
           if not df_detail_display.empty:
             st.dataframe(df_detail_display, use_container_width=True)
             st.caption(
-                "ℹ️ Ditampilkan 200 baris teratas. Gunakan tombol di bawah"
-                " untuk mengunduh seluruh data lengkap."
+                f"ℹ️ Ditampilkan 200 baris teratas di layar. Total keseluruhan data yang tersedia untuk diunduh: **{len(df_detail_full):,} AWB**."
             )
             st.download_button(
-                "📥 Download CSV Lengkap Detail UnRunsheet",
-                df_detail_full.to_csv(index=False).encode("utf-8"),
+                label=f"📥 Download CSV Lengkap Detail UnRunsheet ({len(df_detail_full):,} AWB)",
+                data=df_detail_full.to_csv(index=False).encode("utf-8"),
                 file_name="Detail_UnRunsheet_Full.csv",
                 mime="text/csv",
             )
@@ -777,12 +769,11 @@ try:
         if not df_uninbound_display.empty:
           st.dataframe(df_uninbound_display, use_container_width=True)
           st.caption(
-              "ℹ️ Ditampilkan 200 baris teratas. Gunakan tombol di bawah"
-              " untuk mengunduh seluruh data lengkap."
+              f"ℹ️ Ditampilkan 200 baris teratas di layar. Total keseluruhan data UnInbound yang tersedia untuk diunduh: **{len(df_uninbound_full):,} AWB**."
           )
           st.download_button(
-              "📥 Download CSV Lengkap UnInbound",
-              df_uninbound_full.to_csv(index=False).encode("utf-8"),
+              label=f"📥 Download CSV Lengkap UnInbound ({len(df_uninbound_full):,} AWB)",
+              data=df_uninbound_full.to_csv(index=False).encode("utf-8"),
               file_name="UnInbound_Full.csv",
               mime="text/csv",
           )
@@ -912,9 +903,6 @@ try:
 
         st.markdown("---")
 
-        # =========================================================
-        # PILIH TAMPILAN GRAFIK & AGREGASI PERIODE (MENGGUNAKAN Last_Inbound)
-        # =========================================================
         c_tr_1, c_tr_2 = st.columns([2, 2])
         with c_tr_1:
           st.subheader("📈 Total Inbound Tren (Tahun 2026)")
@@ -926,9 +914,6 @@ try:
               label_visibility="collapsed",
           )
 
-        # ---------------------------------------------------------
-        # WIDGET FILTER RENTANG TANGGAL (DAY RANGE 1-31)
-        # ---------------------------------------------------------
         enable_day_filter = st.checkbox(
             "📌 Aktifkan Filter Rentang Tanggal (Day Range 1–31)", value=False
         )
@@ -979,7 +964,6 @@ try:
                     """
           group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
 
-        # Query Trend Inbound menggunakan Last_Inbound sebagai acuan tahun
         df_inbound_trend = run_query(f"""
                     SELECT 
                         {sql_trend_group},
@@ -1006,9 +990,6 @@ try:
           )
           st.plotly_chart(fig_inbound, use_container_width=True)
 
-        # =========================================================
-        # TABEL PRODUKTIVITAS PER CABANG (PIVOT MEMANJANG KE KANAN)
-        # =========================================================
         st.markdown("---")
         st.subheader("📋 Tabel Produktivitas")
 
