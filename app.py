@@ -384,7 +384,7 @@ try:
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UnRunsheet with PRA' THEN AWB END) AS total_unrunsheet_pra,
                     COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') THEN AWB END) AS total_success,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'SUCCESS RETURN SHIPPER' THEN AWB END) AS total_return,
-                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) AS total_success_unhrs,
+                    COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' THEN AWB END) AS total_success_unhrs,
                     COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) THEN AWB END) AS total_undel_unhrs
                 FROM v_inbound {where_sql}
             """)
@@ -499,7 +499,7 @@ try:
           if card_title == "Success UnHRS":
             card_query_filter = (
                 "Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN"
-                " SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)"
+                " SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%'"
             )
           elif card_title == "Undel UnHRS":
             card_query_filter = (
@@ -518,12 +518,12 @@ try:
             card_query_filter = "1=1"
 
           df_card_detail_display = run_query(f"""
-                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
+                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
                         ORDER BY age_days DESC LIMIT 200
                     """)
           df_card_detail_full = run_query(f"""
-                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
+                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
                         ORDER BY age_days DESC
                     """)
@@ -730,13 +730,13 @@ try:
             "📋 Detail AWB (Klik untuk Buka/Tutup)", expanded=False
         ):
           df_detail_display = run_query(f"""
-                        SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                        SELECT AWB, Last_Inbound, WUS_DATE, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         ORDER BY age_days DESC
                         LIMIT 200
                     """)
           df_detail_full = run_query(f"""
-                        SELECT AWB, Last_Inbound, WUS_DATE, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                        SELECT AWB, Last_Inbound, WUS_DATE, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         ORDER BY age_days DESC
                     """)
@@ -757,12 +757,12 @@ try:
       else:
         st.subheader("⚠️ Tabel UnInbound")
         df_uninbound_display = run_query(f"""
-                    SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
+                    SELECT AWB, Cabang, Zona, Kecamatan, RUNSHEET_NO, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
                     FROM v_inbound {where_sql} AND Status_Shipment = 'UnInbound'
                     ORDER BY age_days DESC LIMIT 200
                 """)
         df_uninbound_full = run_query(f"""
-                    SELECT AWB, Cabang, Zona, Kecamatan, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
+                    SELECT AWB, Cabang, Zona, Kecamatan, RUNSHEET_NO, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
                     FROM v_inbound {where_sql} AND Status_Shipment = 'UnInbound'
                     ORDER BY age_days DESC
                 """)
@@ -816,13 +816,13 @@ try:
 
         kpi_batch_df = run_query(f"""
                     SELECT 
-                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_vol,
-                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_curr_tot,
-                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) IN ('A', 'B') AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_curr_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS succ_ab_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' AND UPPER(TRIM(Zona)) IN ('A', 'B') AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group = 'H+0' THEN AWB END) AS succ_ab_curr_tgt,
                         
-                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_vol,
-                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_curr_tot,
-                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(TRIM(Zona)) = 'C' AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_curr_tgt,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_vol,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' AND UPPER(TRIM(Zona)) = 'C' THEN AWB END) AS succ_c_curr_tot,
+                        COUNT(DISTINCT CASE WHEN Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' AND UPPER(TRIM(Zona)) = 'C' AND HRS IN ('HRS', 'HOC', 'HRI') AND hrs_aging_group IN ('H+0', 'H+1') THEN AWB END) AS succ_c_curr_tgt,
 
                         COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_vol,
                         COUNT(DISTINCT CASE WHEN Status_Shipment = 'UNDELIVERY' AND UPPER(TRIM(Zona)) IN ('A', 'B') THEN AWB END) AS undel_ab_curr_tot,
@@ -1216,7 +1216,7 @@ try:
                         SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb
                         FROM v_inbound
                         {where_sql} {week_clause} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER')
-                          AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL)
+                          AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%'
                         GROUP BY Cabang, wus_aging_group
                     """)
           render_plotly_table_matrix(
