@@ -736,7 +736,7 @@ try:
                         LIMIT 200
                     """)
           df_detail_full = run_query(f"""
-                        SELECT AWB, Last_Inbound, WUS_DATE, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                        SELECT AWB, Last_Inbound, WUS_DATE, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                         ORDER BY age_days DESC
                     """)
