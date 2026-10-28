@@ -247,16 +247,12 @@ try:
       )
   ]
 
-  default_start = (
-      min_max_date.iloc[0, 0].date()
-      if not min_max_date.empty and pd.notnull(min_max_date.iloc[0, 0])
-      else datetime.date(2026, 1, 1)
-  )
   default_end = (
-      min_max_date.iloc[0, 1].date()
-      if not min_max_date.empty and pd.notnull(min_max_date.iloc[0, 1])
-      else datetime.date.today()
-  )
+        min_max_date.iloc[0, 1].date()
+        if not min_max_date.empty and pd.notnull(min_max_date.iloc[0, 1])
+        else datetime.date.today()
+    )
+    default_start = default_end - datetime.timedelta(days=30)
 
   with st.sidebar.form("filter_form"):
     date_range = st.date_input(
