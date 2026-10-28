@@ -253,7 +253,6 @@ try:
         else datetime.date.today()
     )
     default_start = default_end - datetime.timedelta(days=30)
-
   with st.sidebar.form("filter_form"):
     date_range = st.date_input(
         "📅 Filter Rentang Tanggal (Kosongkan untuk Semua Data):",
