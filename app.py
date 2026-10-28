@@ -255,13 +255,19 @@ try:
   default_start = default_end - datetime.timedelta(days=30)
 
   with st.sidebar.form("filter_form"):
-    date_range = st.date_input(
-        "📅 Filter Rentang Tanggal:",
-        value=(default_start, default_end),
-        min_value=default_start,
-        max_value=default_end,
-        help="Rentang tanggal otomatis 30 hari terakhir hingga data terbaru.",
+    enable_date_filter = st.checkbox(
+        "📅 Aktifkan Filter Rentang Tanggal", value=True
     )
+
+    if enable_date_filter:
+      date_range = st.date_input(
+          "Pilih Rentang Tanggal:",
+          value=(default_start, default_end),
+          min_value=default_start,
+          max_value=default_end,
+      )
+    else:
+      date_range = None
 
     chosen_loc = st.multiselect("🔍 Filter Last Location:", unique_locations)
     chosen_cabang = st.multiselect("🏢 Filter Cabang:", unique_cabang)
