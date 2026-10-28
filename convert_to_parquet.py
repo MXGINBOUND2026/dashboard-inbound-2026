@@ -295,7 +295,7 @@ query_duckdb = f"""
             COALESCE(STRFTIME(w.dt_wus, '%m/%d/%Y %H:%M'), '-') AS WUS_DATE,
             COALESCE(w.BILNOTE_AMOUNT, 0) AS BILNOTE_AMOUNT,
             COALESCE(w.RUNSHEET_COURIER_NAME, '-') AS RUNSHEET_COURIER_NAME,
-            COALESCE(w.RUNSHEET_NO, '-') AS RUNSHEET_NO, -- <--- DITAMBAHKAN DI SINI
+            COALESCE(w.RUNSHEET_NO, '-') AS RUNSHEET_NO,
             CASE WHEN w.BILNOTE_AMOUNT IS NOT NULL AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '' AND TRIM(CAST(w.BILNOTE_AMOUNT AS VARCHAR)) != '0' THEN 'COD' ELSE 'Non COD' END AS payment_type,
             COALESCE(w.LAST_LOCATION, 'UNKNOWN LOCATION') AS LAST_LOCATION,
             COALESCE(s.KABUPATEN, 'UNKNOWN CABANG') AS Cabang,
@@ -372,7 +372,7 @@ query_duckdb = f"""
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 2 THEN 'H+2'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 3 THEN 'H+3'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 4 THEN 'H+4'
-                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 5 THEN 'H+5'
+                        WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_update_pod AS DATE)) = 5 THEN 'H+5'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 6 THEN 'H+6'
                         WHEN DATEDIFF('day', CAST(w.dt_update_pod AS DATE), CAST(w.dt_wus AS DATE)) = 7 THEN 'H+7'
                         ELSE '>H+7'
