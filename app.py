@@ -256,11 +256,11 @@ try:
 
   with st.sidebar.form("filter_form"):
     date_range = st.date_input(
-        "📅 Filter Rentang Tanggal (Kosongkan untuk Semua Data):",
-        value=(),
+        "📅 Filter Rentang Tanggal:",
+        value=(default_start, default_end),
         min_value=default_start,
         max_value=default_end,
-        help="Kosongkan nilai ini jika ingin menampilkan seluruh data termasuk yang tanpa tanggal (UnInbound)",
+        help="Rentang tanggal otomatis 30 hari terakhir hingga data terbaru.",
     )
 
     chosen_loc = st.multiselect("🔍 Filter Last Location:", unique_locations)
