@@ -337,11 +337,7 @@ try:
   with tab1:
     with st.spinner("⏳ Memuat Main Dashboard..."):
       max_date_df = run_query("""
-                SELECT MAX(COALESCE(
-                    TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)
-                )) as max_dt FROM v_inbound
+                SELECT MAX(TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)) as max_dt FROM v_inbound
             """)
       max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
       formatted_date = (
@@ -621,14 +617,18 @@ try:
                   text="<b>Aging UnRunsheet</b>",
                   x=0,
                   xanchor="left",
-                  font=dict(size=16, color="#ffffff"),
+                  font=dict(size=16, color="#FFFFFF"),
               ),
-              plot_bgcolor="rgba(40, 40, 40, 0.8)",
+              plot_bgcolor="rgba(30, 30, 30, 0.9)",
               paper_bgcolor="rgba(0, 0, 0, 0)",
-              font=dict(color="#CCCCCC"),
+              font=dict(color="#FFFFFF", size=12),
               height=350,
           )
+          fig.update_traces(
+              textfont_color="#FFFFFF", textangle=0, textposition="outside"
+          )
           st.plotly_chart(fig, use_container_width=True)
+
         aging_click_clause = (
             f"AND aging_group = '{selected_aging_filter}'"
             if selected_aging_filter
