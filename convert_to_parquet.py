@@ -226,12 +226,12 @@ query_duckdb = f"""
         calc_inbound AS (
             SELECT j.*,
                 GREATEST(
-                    CASE WHEN UPPER(COALESCE(INBOUND_MANIFEST, '')) LIKE '%MXG%' THEN dt_im ELSE NULL END,
+                    dt_im,
                     CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END,
-                    CASE WHEN dt_mti IS NOT NULL THEN dt_mti ELSE NULL END,
-                    CASE WHEN dt_mts IS NOT NULL THEN dt_mts ELSE NULL END
+                    dt_mti,
+                    dt_mts
                 ) AS valid_inbound_date,
                 COALESCE(dt_ob, CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END) AS valid_uninbound_date
             FROM joined_loc j
