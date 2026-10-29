@@ -259,12 +259,9 @@ try:
         "📅 Aktifkan Filter Rentang Tanggal", value=True
     )
 
-    if enable_date_filter:
-      date_range = st.date_input(
+    ifdate_range = st.date_input(
           "Pilih Rentang Tanggal:",
           value=(default_start, default_end),
-          min_value=default_start,
-          max_value=default_end,
       )
     else:
       date_range = None
