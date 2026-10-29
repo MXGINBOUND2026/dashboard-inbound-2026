@@ -339,8 +339,8 @@ try:
       max_date_df = run_query("""
                 SELECT MAX(COALESCE(
                     TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(TGL_TARIK_REPORT, '%d-%b-%Y %H:%M'),
-                    TRY_STRPTIME(TGL_TARIK_REPORT, '%d-%b-%Y %H:%M:%S'),
+                    TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M:%S'), 
+                    TRY_STRPTIME(TGL_TARIK_REPORT, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)
                 )) as max_dt FROM v_inbound
             """)
