@@ -617,13 +617,18 @@ try:
               labels={"aging_group": "", "total_awb": ""},
           )
           fig.update_layout(
+              title=dict(
+                  text="<b>Aging UnRunsheet</b>",
+                  x=0,
+                  xanchor="left",
+                  font=dict(size=16, color="#ffffff"),
+              ),
               plot_bgcolor="rgba(40, 40, 40, 0.8)",
               paper_bgcolor="rgba(0, 0, 0, 0)",
               font=dict(color="#CCCCCC"),
-              height=330,
+              height=350,
           )
           st.plotly_chart(fig, use_container_width=True)
-
         aging_click_clause = (
             f"AND aging_group = '{selected_aging_filter}'"
             if selected_aging_filter
