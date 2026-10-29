@@ -337,7 +337,12 @@ try:
   with tab1:
     with st.spinner("⏳ Memuat Main Dashboard..."):
       max_date_df = run_query("""
-                SELECT MAX(TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)) as max_dt FROM v_inbound
+                SELECT MAX(COALESCE(
+                    TRY_STRPTIME(TGL_TARIK_REPORT, '%m/%d/%Y %H:%M'), 
+                    TRY_STRPTIME(TGL_TARIK_REPORT, '%d-%b-%Y %H:%M'),
+                    TRY_STRPTIME(TGL_TARIK_REPORT, '%d-%b-%Y %H:%M:%S'),
+                    TRY_CAST(TGL_TARIK_REPORT AS TIMESTAMP)
+                )) as max_dt FROM v_inbound
             """)
       max_date = max_date_df["max_dt"][0] if not max_date_df.empty else None
       formatted_date = (
