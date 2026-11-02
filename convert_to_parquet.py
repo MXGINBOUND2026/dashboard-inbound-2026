@@ -203,6 +203,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
                 ) AS dt_im,
@@ -215,6 +216,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(HVO_DATE AS TIMESTAMP)
                 ) AS dt_hvo,
@@ -227,6 +229,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(HVI_DATE AS TIMESTAMP)
                 ) AS dt_hvi,
@@ -239,6 +242,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
                 ) AS dt_mti,
@@ -251,6 +255,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)
                 ) AS dt_mts,
@@ -263,6 +268,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)
                 ) AS dt_tm,
@@ -275,6 +281,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)
                 ) AS dt_run,
@@ -287,6 +294,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)
                 ) AS dt_ob,
@@ -299,6 +307,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(TGL_UPDATE_STATUS_POD AS TIMESTAMP)
                 ) AS dt_update_pod,
@@ -311,6 +320,7 @@ query_duckdb = f"""
                     TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %I:%M %p'),
                     TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %H:%M:%S'), 
                     TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %H:%M'), 
+                    TRY_STRPTIME(WUS_DATE, '%d-%b-%Y %H:%M:%S'), 
                     TRY_STRPTIME(WUS_DATE, '%d-%b-%Y %H:%M'), 
                     TRY_CAST(WUS_DATE AS TIMESTAMP)
                 ) AS dt_wus,
