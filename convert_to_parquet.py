@@ -21,100 +21,100 @@ USER_ID_FILE_NAME = "User_Id_MXG.xlsx"
 
 
 def get_drive_service():
-  SCOPES = ["https://www.googleapis.com/auth/drive"]
-  b64_secret = os.environ.get("GDRIVE_CREDENTIALS_B64")
-  if b64_secret:
-    try:
-      json_bytes = base64.b64decode(b64_secret)
-      creds_dict = json.loads(json_bytes.decode("utf-8"))
-    except Exception as e:
-      raise ValueError(f"Gagal mendecode Base64 GDRIVE_CREDENTIALS_B64: {e}")
-  else:
-    raise FileNotFoundError(
-        "Environment Variable 'GDRIVE_CREDENTIALS_B64' tidak ditemukan!"
+    SCOPES = ["https://www.googleapis.com/auth/drive"]
+    b64_secret = os.environ.get("GDRIVE_CREDENTIALS_B64")
+    if b64_secret:
+        try:
+            json_bytes = base64.b64decode(b64_secret)
+            creds_dict = json.loads(json_bytes.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Gagal mendecode Base64 GDRIVE_CREDENTIALS_B64: {e}")
+    else:
+        raise FileNotFoundError(
+            "Environment Variable 'GDRIVE_CREDENTIALS_B64' tidak ditemukan!"
+        )
+
+    if "private_key" in creds_dict:
+        pk = str(creds_dict["private_key"]).replace("\\n", "\n").strip()
+        creds_dict["private_key"] = pk
+
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=SCOPES
     )
-
-  if "private_key" in creds_dict:
-    pk = str(creds_dict["private_key"]).replace("\\n", "\n").strip()
-    creds_dict["private_key"] = pk
-
-  creds = service_account.Credentials.from_service_account_info(
-      creds_dict, scopes=SCOPES
-  )
-  return build("drive", "v3", credentials=creds)
+    return build("drive", "v3", credentials=creds)
 
 
 def download_gdrive_folder(service, folder_id, local_path):
-  if not os.path.exists(local_path):
-    os.makedirs(local_path)
-  page_token = None
-  while True:
-    query = f"'{folder_id}' in parents and trashed = false"
-    results = (
-        service.files()
-        .list(
-            q=query,
-            pageSize=100,
-            fields="nextPageToken, files(id, name, mimeType)",
-            pageToken=page_token,
+    if not os.path.exists(local_path):
+        os.makedirs(local_path)
+    page_token = None
+    while True:
+        query = f"'{folder_id}' in parents and trashed = false"
+        results = (
+            service.files()
+            .list(
+                q=query,
+                pageSize=100,
+                fields="nextPageToken, files(id, name, mimeType)",
+                pageToken=page_token,
+            )
+            .execute()
         )
-        .execute()
-    )
-    items = results.get("files", [])
-    for item in items:
-      file_id = item["id"]
-      file_name = item["name"]
-      mime_type = item["mimeType"]
-      if file_name == OUTPUT_PARQUET:
-        continue
-      local_item_path = os.path.join(local_path, file_name)
-      if mime_type == "application/vnd.google-apps.folder":
-        download_gdrive_folder(service, file_id, local_item_path)
-      else:
-        print(f"Mengunduh file: {file_name}")
+        items = results.get("files", [])
+        for item in items:
+            file_id = item["id"]
+            file_name = item["name"]
+            mime_type = item["mimeType"]
+            if file_name == OUTPUT_PARQUET:
+                continue
+            local_item_path = os.path.join(local_path, file_name)
+            if mime_type == "application/vnd.google-apps.folder":
+                download_gdrive_folder(service, file_id, local_item_path)
+            else:
+                print(f"Mengunduh file: {file_name}")
+                request = service.files().get_media(fileId=file_id)
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                with open(local_item_path, "wb") as f:
+                    f.write(fh.getvalue())
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+
+
+def download_specific_file(service, folder_id, file_name, local_path):
+    try:
+        query = (
+            f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
+        )
+        results = service.files().list(q=query, fields="files(id, name)").execute()
+        items = results.get("files", [])
+        if not items:
+            return False
+        file_id = items[0]["id"]
+        print(f"Mengunduh file pendukung: {file_name}")
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done:
-          _, done = downloader.next_chunk()
-        with open(local_item_path, "wb") as f:
-          f.write(fh.getvalue())
-    page_token = results.get("nextPageToken")
-    if not page_token:
-      break
-
-
-def download_specific_file(service, folder_id, file_name, local_path):
-  try:
-    query = (
-        f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
-    )
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    items = results.get("files", [])
-    if not items:
-      return False
-    file_id = items[0]["id"]
-    print(f"Mengunduh file pendukung: {file_name}")
-    request = service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-      _, done = downloader.next_chunk()
-    with open(local_path, "wb") as f:
-      f.write(fh.getvalue())
-    return True
-  except Exception as e:
-    print(f"Gagal mengunduh {file_name}: {e}")
-    return False
+            _, done = downloader.next_chunk()
+        with open(local_path, "wb") as f:
+            f.write(fh.getvalue())
+        return True
+    except Exception as e:
+        print(f"Gagal mengunduh {file_name}: {e}")
+        return False
 
 
 print("1. Menghubungkan ke Google Drive API...")
 service = get_drive_service()
 
 if os.path.exists(TEMP_CSV_DIR):
-  shutil.rmtree(TEMP_CSV_DIR)
+    shutil.rmtree(TEMP_CSV_DIR)
 
 print("2. Mengunduh seluruh file CSV utama dan file pendukung dari GDrive...")
 download_gdrive_folder(service, TARGET_GDRIVE_FOLDER_ID, TEMP_CSV_DIR)
@@ -140,14 +140,14 @@ df_coding = (
     else pd.DataFrame()
 )
 if not df_coding.empty:
-  df_coding.columns = df_coding.columns.str.strip()
-  df_coding = df_coding[["CODE", "CATEGORY", "DESCRIPTION"]].drop_duplicates(
-      subset=["CODE"]
-  )
-  df_coding.rename(
-      columns={"CATEGORY": "POD_Category", "DESCRIPTION": "POD_DESC"},
-      inplace=True,
-  )
+    df_coding.columns = df_coding.columns.str.strip()
+    df_coding = df_coding[["CODE", "CATEGORY", "DESCRIPTION"]].drop_duplicates(
+        subset=["CODE"]
+    )
+    df_coding.rename(
+        columns={"CATEGORY": "POD_Category", "DESCRIPTION": "POD_DESC"},
+        inplace=True,
+    )
 
 df_syscode = (
     pd.read_excel(local_syscode_path)
@@ -155,7 +155,7 @@ df_syscode = (
     else pd.DataFrame()
 )
 if not df_syscode.empty:
-  df_syscode.columns = df_syscode.columns.str.strip()
+    df_syscode.columns = df_syscode.columns.str.strip()
 
 df_user_id = (
     pd.read_excel(local_user_id_path)
@@ -163,7 +163,7 @@ df_user_id = (
     else pd.DataFrame()
 )
 if not df_user_id.empty:
-  df_user_id.columns = df_user_id.columns.str.strip()
+    df_user_id.columns = df_user_id.columns.str.strip()
 
 print("\n4. Menjalankan kalkulasi komprehensif di DuckDB...")
 con = duckdb.connect()
@@ -288,21 +288,22 @@ query_duckdb = f"""
                 u_mti.USER_ZONE_NAME AS MTI_LOCATION,
                 CASE WHEN UPPER(COALESCE(p.TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN u_tm.USER_ZONE_NAME ELSE NULL END AS TM_LOCATION
             FROM parsed p
-            LEFT JOIN user_id_tbl u_im ON p.USER_IM = u_im.USER_ID
-            LEFT JOIN user_id_tbl u_mts ON p.MTS_USER = u_mts.USER_ID
-            LEFT JOIN user_id_tbl u_mti ON p.MTI_USER = u_mti.USER_ID
-            LEFT JOIN user_id_tbl u_tm ON p.TRANSIT_MANIFEST_USER = u_tm.USER_ID
+            LEFT JOIN user_id_tbl u_im ON CAST(p.USER_IM AS VARCHAR) = CAST(u_im.USER_ID AS VARCHAR)
+            LEFT JOIN user_id_tbl u_mts ON CAST(p.MTS_USER AS VARCHAR) = CAST(u_mts.USER_ID AS VARCHAR)
+            LEFT JOIN user_id_tbl u_mti ON CAST(p.MTI_USER AS VARCHAR) = CAST(u_mti.USER_ID AS VARCHAR)
+            LEFT JOIN user_id_tbl u_tm ON CAST(p.TRANSIT_MANIFEST_USER AS VARCHAR) = CAST(u_tm.USER_ID AS VARCHAR)
         ),
         calc_inbound AS (
             SELECT j.*,
-                GREATEST(
+                -- PERBAIKAN UTAMA: Menggunakan ARRAY_MAX agar mengabaikan kolom NULL
+                ARRAY_MAX([
                     dt_im,
                     CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN dt_tm ELSE NULL END,
                     dt_mti,
                     dt_mts
-                ) AS valid_inbound_date,
+                ]) AS valid_inbound_date,
                 COALESCE(dt_ob, CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END) AS valid_uninbound_date
             FROM joined_loc j
         ),
@@ -310,12 +311,12 @@ query_duckdb = f"""
             SELECT c.*,
                 CASE 
                     WHEN valid_inbound_date IS NULL THEN NULL
-                    WHEN valid_inbound_date = dt_im  THEN IM_LOCATION
-                    WHEN valid_inbound_date = dt_hvo THEN TRY_CAST(c.HVO_HUB_NAME AS VARCHAR)
-                    WHEN valid_inbound_date = dt_hvi THEN TRY_CAST(c.HVO_HUB_DESTINATION_NAME AS VARCHAR)
+                    WHEN valid_inbound_date = dt_im THEN IM_LOCATION
+                    WHEN valid_inbound_date = dt_hvo AND UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN TRY_CAST(c.HVO_HUB_NAME AS VARCHAR)
+                    WHEN valid_inbound_date = dt_hvi AND UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN TRY_CAST(c.HVO_HUB_DESTINATION_NAME AS VARCHAR)
                     WHEN valid_inbound_date = dt_mti THEN MTI_LOCATION
                     WHEN valid_inbound_date = dt_mts THEN MTS_LOCATION
-                    WHEN valid_inbound_date = dt_tm  THEN TM_LOCATION
+                    WHEN valid_inbound_date = dt_tm AND UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN TM_LOCATION
                     ELSE NULL
                 END AS LAST_LOCATION,
                 CASE 
@@ -452,7 +453,7 @@ query_duckdb = f"""
             CASE WHEN w.dt_update_pod IS NOT NULL THEN EXTRACT(WEEK FROM w.dt_update_pod) ELSE NULL END AS pod_week_num,
             w.TGL_TARIK_REPORT
         FROM processed w
-        LEFT JOIN syscode_tbl s ON w.DEST = s.SYSCODE
+        LEFT JOIN syscode_tbl s ON CAST(w.DEST AS VARCHAR) = CAST(s.SYSCODE AS VARCHAR)
         WHERE w.Status_Shipment != 'AWB Cancel'
     ) TO '{OUTPUT_PARQUET}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
 """
@@ -470,10 +471,10 @@ results = service.files().list(q=query, fields="files(id, name)").execute()
 items = results.get("files", [])
 
 if items:
-  file_id = items[0]["id"]
-  service.files().update(fileId=file_id, media_body=media).execute()
-  print("🎉 SUKSES! File Parquet berhasil di-update di Google Drive!")
+    file_id = items[0]["id"]
+    service.files().update(fileId=file_id, media_body=media).execute()
+    print("🎉 SUKSES! File Parquet berhasil di-update di Google Drive!")
 else:
-  file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
-  service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-  print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
+    file_metadata = {"name": OUTPUT_PARQUET, "parents": [TARGET_GDRIVE_FOLDER_ID]}
+    service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    print("🎉 SUKSES! File Parquet baru berhasil diunggah ke Google Drive!")
