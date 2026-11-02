@@ -295,8 +295,7 @@ query_duckdb = f"""
         ),
         calc_inbound AS (
             SELECT j.*,
-                -- PERBAIKAN UTAMA: Menggunakan ARRAY_MAX agar mengabaikan kolom NULL
-                ARRAY_MAX([
+                list_max([
                     dt_im,
                     CASE WHEN UPPER(COALESCE(HVO_NO, '')) LIKE '%MXG%' THEN dt_hvo ELSE NULL END,
                     CASE WHEN UPPER(COALESCE(HVI_NO, '')) LIKE '%MXG%' THEN dt_hvi ELSE NULL END,
