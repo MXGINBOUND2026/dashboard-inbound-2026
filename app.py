@@ -537,7 +537,7 @@ try:
 
             st.markdown(
                 f'<div class="marquee-container-tab1">'
-                f'<div class="marquee-text-tab1">🔥 TOP 5 UNRUNSHEET: &nbsp;&nbsp;{top_kecamatan_str}</div>'
+                f'<div class="marquee-text-tab1">🔥 TOP 5 BOTTLENECK UNRUNSHEET: &nbsp;&nbsp;{top_kecamatan_str}</div>'
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -997,22 +997,88 @@ try:
                     "📊 Tabel Matrix Status Shipment (Klik untuk Buka/Tutup)",
                     expanded=False,
                 ):
+                    if "matrix_status_mode" not in st.session_state:
+                        st.session_state.matrix_status_mode = None
+
+                    if st.session_state.matrix_status_mode:
+                        col_m_title, col_m_opt, col_m_rst = st.columns([2.2, 1.3, 0.7])
+                    else:
+                        col_m_title, col_m_opt = st.columns([2.2, 2.0])
+                        col_m_rst = None
+
+                    with col_m_title:
+                        st.markdown("#### 📊 Matrix Status Shipment")
+
+                    with col_m_opt:
+                        if hasattr(st, "segmented_control"):
+                            selected_mode = st.segmented_control(
+                                "Kategori Status:",
+                                options=["Monitoring", "Close"],
+                                default=st.session_state.matrix_status_mode,
+                                label_visibility="collapsed",
+                                key="matrix_status_seg",
+                            )
+                        else:
+                            selected_mode = st.radio(
+                                "Kategori Status:",
+                                options=["Monitoring", "Close"],
+                                index=["Monitoring", "Close"].index(
+                                    st.session_state.matrix_status_mode
+                                )
+                                if st.session_state.matrix_status_mode
+                                in ["Monitoring", "Close"]
+                                else None,
+                                horizontal=True,
+                                label_visibility="collapsed",
+                                key="matrix_status_radio",
+                            )
+
+                        if selected_mode != st.session_state.matrix_status_mode:
+                            st.session_state.matrix_status_mode = selected_mode
+                            st.rerun()
+
+                    if col_m_rst is not None:
+                        with col_m_rst:
+                            if st.button(
+                                "🔄 Reset",
+                                key="btn_reset_matrix_status",
+                                use_container_width=True,
+                            ):
+                                st.session_state.matrix_status_mode = None
+                                if "matrix_status_seg" in st.session_state:
+                                    del st.session_state["matrix_status_seg"]
+                                if "matrix_status_radio" in st.session_state:
+                                    del st.session_state["matrix_status_radio"]
+                                st.rerun()
+
+                    matrix_cat_clause = (
+                        f"AND Status_Category = '{st.session_state.matrix_status_mode}'"
+                        if st.session_state.matrix_status_mode
+                        else ""
+                    )
+
                     pivot_matrix = run_query(
                         f"""
-                        PIVOT (SELECT Status_Shipment, aging_group, AWB FROM v_inbound {where_sql})
+                        PIVOT (SELECT Status_Shipment, aging_group, AWB FROM v_inbound {where_sql} {matrix_cat_clause})
                         ON aging_group IN ('H+0', 'H+1', 'H+2', 'H+3', 'H+4', 'H+5', 'H+6', 'H+7', '>H+7')
                         USING COUNT(DISTINCT AWB) GROUP BY Status_Shipment
                         """
                     )
                     if not pivot_matrix.empty:
                         pivot_matrix = pivot_matrix.fillna(0)
-                        numeric_cols = [
-                            c for c in pivot_matrix.columns if c != "Status_Shipment"
-                        ]
-                        pivot_matrix["Grand Total"] = pivot_matrix[numeric_cols].sum(
+                        for col in AGING_ORDER:
+                            if col not in pivot_matrix.columns:
+                                pivot_matrix[col] = 0
+                        pivot_matrix = pivot_matrix[["Status_Shipment"] + AGING_ORDER]
+                        pivot_matrix["Grand Total"] = pivot_matrix[AGING_ORDER].sum(
                             axis=1
                         )
+                        pivot_matrix = pivot_matrix.sort_values(
+                            by="Grand Total", ascending=False
+                        )
                         st.dataframe(pivot_matrix, use_container_width=True)
+                    else:
+                        st.info("Tidak ada data untuk kategori status tersebut.")
 
                 with st.expander(
                     "🗂️ UnRunsheet By Last Location, Cabang, Zona, Kecamatan",
