@@ -997,13 +997,14 @@ try:
                     "📊 Tabel Matrix Status Shipment (Klik untuk Buka/Tutup)",
                     expanded=False,
                 ):
+                    STATUS_CAT_OPTIONS = ["Monitoring", "Close", "OTS Firstmile"]
                     if "matrix_status_mode" not in st.session_state:
                         st.session_state.matrix_status_mode = None
 
                     if st.session_state.matrix_status_mode:
-                        col_m_title, col_m_opt, col_m_rst = st.columns([2.2, 1.3, 0.7])
+                        col_m_title, col_m_opt, col_m_rst = st.columns([1.7, 1.9, 0.6])
                     else:
-                        col_m_title, col_m_opt = st.columns([2.2, 2.0])
+                        col_m_title, col_m_opt = st.columns([1.7, 2.5])
                         col_m_rst = None
 
                     with col_m_title:
@@ -1013,7 +1014,7 @@ try:
                         if hasattr(st, "segmented_control"):
                             selected_mode = st.segmented_control(
                                 "Kategori Status:",
-                                options=["Monitoring", "Close"],
+                                options=STATUS_CAT_OPTIONS,
                                 default=st.session_state.matrix_status_mode,
                                 label_visibility="collapsed",
                                 key="matrix_status_seg",
@@ -1021,12 +1022,12 @@ try:
                         else:
                             selected_mode = st.radio(
                                 "Kategori Status:",
-                                options=["Monitoring", "Close"],
-                                index=["Monitoring", "Close"].index(
+                                options=STATUS_CAT_OPTIONS,
+                                index=STATUS_CAT_OPTIONS.index(
                                     st.session_state.matrix_status_mode
                                 )
                                 if st.session_state.matrix_status_mode
-                                in ["Monitoring", "Close"]
+                                in STATUS_CAT_OPTIONS
                                 else None,
                                 horizontal=True,
                                 label_visibility="collapsed",
