@@ -430,9 +430,10 @@ query_duckdb = f"""
             COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
             w.Status_Shipment AS Status_Shipment,
             CASE
+                WHEN w.Status_Shipment IN ('UnReceiving', 'UnOutbound') THEN 'OTS Firstmile'
+                WHEN w.Status_Shipment IN ('Return', 'AWB Cancel') THEN 'Close'
                 WHEN UPPER(TRIM(COALESCE(CAST(w.CEK_STATUS AS VARCHAR), ''))) IN ('CLOSE', 'CLOSED') THEN 'Close'
                 WHEN UPPER(TRIM(COALESCE(CAST(w.CEK_STATUS AS VARCHAR), ''))) IN ('MONITOR', 'MONITORING') THEN 'Monitoring'
-                WHEN w.Status_Shipment = 'AWB Cancel' THEN 'Close'
                 ELSE 'Monitoring'
             END AS Status_Category,
             w.HRS AS HRS,
