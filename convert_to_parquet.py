@@ -141,11 +141,17 @@ df_coding = (
 )
 if not df_coding.empty:
     df_coding.columns = df_coding.columns.str.strip()
-    df_coding = df_coding[["CODE", "CATEGORY", "DESCRIPTION"]].drop_duplicates(
+    if "CEK" not in df_coding.columns:
+        df_coding["CEK"] = None
+    df_coding = df_coding[["CODE", "CATEGORY", "DESCRIPTION", "CEK"]].drop_duplicates(
         subset=["CODE"]
     )
     df_coding.rename(
-        columns={"CATEGORY": "POD_Category", "DESCRIPTION": "POD_DESC"},
+        columns={
+            "CATEGORY": "POD_Category",
+            "DESCRIPTION": "POD_DESC",
+            "CEK": "CEK_STATUS",
+        },
         inplace=True,
     )
 
@@ -188,7 +194,7 @@ query_duckdb = f"""
                 main.TRANSIT_MANIFEST, main.TRANSIT_MANIFEST_DATE, main.TRANSIT_MANIFEST_USER, main.RECEIVING_DATE,
                 main.OUTBOUND_MANIFEST_DATE, main.TGL_RECEIVED, main.TGL_TARIK_REPORT, main.TGL_UPDATE_STATUS_POD,
                 main.WUS_DATE, main.BILNOTE_AMOUNT, main.RUNSHEET_COURIER_NAME,
-                ref.POD_Category AS raw_pod_category, ref.POD_DESC
+                ref.POD_Category AS raw_pod_category, ref.POD_DESC, ref.CEK_STATUS
             FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
             LEFT JOIN df_coding_ref AS ref ON CAST(main.CODING AS VARCHAR) = CAST(ref.CODE AS VARCHAR)
         ),
@@ -423,6 +429,12 @@ query_duckdb = f"""
             COALESCE(s."ZONA DELEVERY (QCE)", 'UNKNOWN ZONA') AS Zona,
             COALESCE(s.KECAMATAN, 'UNKNOWN KECAMATAN') AS Kecamatan,
             w.Status_Shipment AS Status_Shipment,
+            CASE
+                WHEN UPPER(TRIM(COALESCE(CAST(w.CEK_STATUS AS VARCHAR), ''))) IN ('CLOSE', 'CLOSED') THEN 'Close'
+                WHEN UPPER(TRIM(COALESCE(CAST(w.CEK_STATUS AS VARCHAR), ''))) IN ('MONITOR', 'MONITORING') THEN 'Monitoring'
+                WHEN w.Status_Shipment = 'AWB Cancel' THEN 'Close'
+                ELSE 'Monitoring'
+            END AS Status_Category,
             w.HRS AS HRS,
             CASE 
                 WHEN w.valid_inbound_date IS NOT NULL THEN DATEDIFF('day', CAST(w.valid_inbound_date AS DATE), CURRENT_DATE)
