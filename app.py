@@ -22,154 +22,143 @@ st.set_page_config(
 # CSS STYLING (PURE CSS INFOGRAPHIC COMPONENTS - 0 RAM)
 # =========================================================
 st.markdown(
-    """
-    <style>
-    /* Header Banner */
-    .hero-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        border: 1px solid #334155;
-        border-left: 5px solid #38bdf8;
-        border-radius: 12px;
-        padding: 16px 22px;
-        margin-bottom: 14px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 10px;
-    }
-    .hero-title {
-        font-size: 24px;
-        font-weight: 800;
-        color: #f8fafc;
-        margin: 0;
-        letter-spacing: -0.3px;
-    }
-    .hero-subtitle {
-        font-size: 13px;
-        color: #94a3b8;
-        margin-top: 2px;
-    }
-    .update-badge {
-        background-color: rgba(56, 189, 248, 0.12);
-        border: 1px solid rgba(56, 189, 248, 0.35);
-        color: #38bdf8;
-        padding: 6px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 600;
-    }
-
-    /* Marquee Ticker */
-    @keyframes marquee {
-        0% { transform: translateX(100%); }
-        100% { transform: translateX(-100%); }
-    }
-    .marquee-container-tab1 {
-        width: 100%;
-        overflow: hidden;
-        white-space: nowrap;
-        background: #0f172a;
-        border: 1px solid #1e293b;
-        padding: 8px 0;
-        border-radius: 8px;
-        box-sizing: border-box;
-        margin-bottom: 16px;
-    }
-    .marquee-text-tab1 {
-        display: inline-block;
-        padding-left: 35%;
-        animation: marquee 45s linear infinite;
-        color: #fbbf24;
-        font-weight: 600;
-        font-size: 13px;
-    }
-
-    /* Infographic KPI Cards */
-    .kpi-card {
-        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 14px 16px;
-        margin-bottom: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-    }
-    .kpi-top {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 6px;
-        gap: 6px;
-    }
-    .kpi-label {
-        font-size: 12px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.4px;
-        color: #94a3b8;
-    }
-    .kpi-pill {
-        font-size: 10px;
-        font-weight: 700;
-        padding: 2px 8px;
-        border-radius: 12px;
-        white-space: nowrap;
-    }
-    .kpi-value {
-        font-size: 28px;
-        font-weight: 800;
-        color: #f8fafc;
-        line-height: 1.15;
-        margin: 4px 0 8px 0;
-    }
-    .kpi-sub {
-        font-size: 12px;
-        color: #cbd5e1;
-        margin-bottom: 8px;
-    }
-    .progress-track {
-        width: 100%;
-        height: 6px;
-        background-color: #334155;
-        border-radius: 999px;
-        overflow: hidden;
-    }
-    .progress-fill {
-        height: 100%;
-        border-radius: 999px;
-    }
-
-    /* Section Title Banner */
-    .section-banner {
-        background-color: #1e293b;
-        border-left: 4px solid #38bdf8;
-        padding: 8px 14px;
-        border-radius: 6px;
-        font-size: 15px;
-        font-weight: 700;
-        color: #f1f5f9;
-        margin: 12px 0;
-    }
-
-    /* SLA Legend Bar */
-    .sla-legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px;
-        font-size: 12px;
-        color: #cbd5e1;
-        background: #0f172a;
-        border: 1px solid #334155;
-        padding: 6px 12px;
-        border-radius: 8px;
-        margin-bottom: 8px;
-    }
-    .dot-green { display:inline-block; width:10px; height:10px; background:#28a745; border-radius:2px; margin-right:5px; }
-    .dot-yellow { display:inline-block; width:10px; height:10px; background:#ffc107; border-radius:2px; margin-right:5px; }
-    .dot-red { display:inline-block; width:10px; height:10px; background:#dc3545; border-radius:2px; margin-right:5px; }
-    .dot-zero { display:inline-block; width:10px; height:10px; background:#1e293b; border:1px solid #475569; border-radius:2px; margin-right:5px; }
-    </style>
-    """,
+    """<style>
+.hero-header {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    border: 1px solid #334155;
+    border-left: 5px solid #38bdf8;
+    border-radius: 12px;
+    padding: 16px 22px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.hero-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: #f8fafc;
+    margin: 0;
+    letter-spacing: -0.3px;
+}
+.hero-subtitle {
+    font-size: 13px;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+.update-badge {
+    background-color: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #38bdf8;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+@keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+}
+.marquee-container-tab1 {
+    width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    padding: 8px 0;
+    border-radius: 8px;
+    box-sizing: border-box;
+    margin-bottom: 16px;
+}
+.marquee-text-tab1 {
+    display: inline-block;
+    padding-left: 35%;
+    animation: marquee 45s linear infinite;
+    color: #fbbf24;
+    font-weight: 600;
+    font-size: 13px;
+}
+.kpi-card {
+    background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.kpi-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 6px;
+}
+.kpi-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #94a3b8;
+}
+.kpi-pill {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+.kpi-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #f8fafc;
+    line-height: 1.15;
+    margin: 4px 0 8px 0;
+}
+.kpi-sub {
+    font-size: 12px;
+    color: #cbd5e1;
+    margin-bottom: 8px;
+}
+.progress-track {
+    width: 100%;
+    height: 6px;
+    background-color: #334155;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    border-radius: 999px;
+}
+.section-banner {
+    background-color: #1e293b;
+    border-left: 4px solid #38bdf8;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin: 12px 0;
+}
+.sla-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: 12px;
+    color: #cbd5e1;
+    background: #0f172a;
+    border: 1px solid #334155;
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+.dot-green { display:inline-block; width:10px; height:10px; background:#28a745; border-radius:2px; margin-right:5px; }
+.dot-yellow { display:inline-block; width:10px; height:10px; background:#ffc107; border-radius:2px; margin-right:5px; }
+.dot-red { display:inline-block; width:10px; height:10px; background:#dc3545; border-radius:2px; margin-right:5px; }
+.dot-zero { display:inline-block; width:10px; height:10px; background:#1e293b; border:1px solid #475569; border-radius:2px; margin-right:5px; }
+</style>""",
     unsafe_allow_html=True,
 )
 
@@ -179,10 +168,10 @@ LOCAL_PARQUET_PATH = os.path.join(os.getcwd(), OUTPUT_PARQUET_NAME)
 
 AGING_ORDER = ["H+0", "H+1", "H+2", "H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]
 AGING_COLOR_MAP = {
-    "H+0": "#28a745",   # Hijau (H+0)
-    "H+1": "#ffc107",   # Kuning (H+1)
-    "H+2": "#ffc107",   # Kuning (H+2)
-    "H+3": "#dc3545",   # Merah (H+3 s/d >H+7)
+    "H+0": "#28a745",
+    "H+1": "#ffc107",
+    "H+2": "#ffc107",
+    "H+3": "#dc3545",
     "H+4": "#dc3545",
     "H+5": "#dc3545",
     "H+6": "#dc3545",
@@ -277,7 +266,7 @@ def sync_parquet_from_gdrive():
             return False
 
 
-# Helper HTML Infographic Card
+# Helper HTML Infographic Card (Inline zero-indentation HTML)
 def render_kpi_card(
     title,
     value_str,
@@ -297,25 +286,18 @@ def render_kpi_card(
         else ""
     )
     bar_html = (
-        f"""
-        <div class="progress-track">
-            <div class="progress-fill" style="width:{pct_clamped:.1f}%; background:{accent_color};"></div>
-        </div>
-        """
+        f'<div class="progress-track"><div class="progress-fill" style="width:{pct_clamped:.1f}%; background:{accent_color};"></div></div>'
         if progress_pct is not None
         else ""
     )
-    return f"""
-    <div class="kpi-card" style="border-top: 3px solid {accent_color};">
-        <div class="kpi-top">
-            <span class="kpi-label">{title}</span>
-            {pill_html}
-        </div>
-        <div class="kpi-value">{value_str}</div>
-        <div class="kpi-sub">{sub_str}</div>
-        {bar_html}
-    </div>
-    """
+    return (
+        f'<div class="kpi-card" style="border-top: 3px solid {accent_color};">'
+        f'<div class="kpi-top"><span class="kpi-label">{title}</span>{pill_html}</div>'
+        f'<div class="kpi-value">{value_str}</div>'
+        f'<div class="kpi-sub">{sub_str}</div>'
+        f"{bar_html}"
+        f"</div>"
+    )
 
 
 # =========================================================
@@ -520,15 +502,11 @@ try:
     )
 
     st.markdown(
-        f"""
-        <div class="hero-header">
-            <div>
-                <div class="hero-title">🚚 Operational Command Center — Inbound 2026</div>
-                <div class="hero-subtitle">Monitoring SLA Runsheet, UnInbound, & Kepatuhan HRS Real-Time</div>
-            </div>
-            <div class="update-badge">🕒 Last Update: {formatted_date}</div>
-        </div>
-        """,
+        f'<div class="hero-header">'
+        f'<div><div class="hero-title">🚚 Dashboard Inbound 2026</div>'
+        f'<div class="hero-subtitle">Monitoring SLA Runsheet, UnInbound, & Kepatuhan HRS Real-Time</div></div>'
+        f'<div class="update-badge">🕒 Last Update: {formatted_date}</div>'
+        f"</div>",
         unsafe_allow_html=True,
     )
 
@@ -558,13 +536,9 @@ try:
             )
 
             st.markdown(
-                f"""
-                <div class="marquee-container-tab1">
-                    <div class="marquee-text-tab1">
-                        🔥 TOP 5 BOTTLENECK UNRUNSHEET: &nbsp;&nbsp;{top_kecamatan_str}
-                    </div>
-                </div>
-                """,
+                f'<div class="marquee-container-tab1">'
+                f'<div class="marquee-text-tab1">🔥 TOP 5 UNRUNSHEET: &nbsp;&nbsp;{top_kecamatan_str}</div>'
+                f"</div>",
                 unsafe_allow_html=True,
             )
 
@@ -799,7 +773,7 @@ try:
 
             if view_choice == "📊 Analisis Infografis UnRunsheet":
                 st.markdown(
-                    '<div class="section-banner">📊 Visualisasi Komposisi & Distribusi Usia SLA (Aging)</div>',
+                    '<div class="section-banner">📊 Visualisasi Komposisi Zona & Distribusi Usia SLA (Aging)</div>',
                     unsafe_allow_html=True,
                 )
                 unrunsheet_status_clause = (
@@ -852,49 +826,62 @@ try:
                         f"📌 Filter Aging Aktif: **{selected_aging_filter}** (Klik 'All' untuk reset)"
                     )
 
-                # 2-Column Infographic Charts: Left = Status Composition Donut, Right = SLA Aging Bar
+                # 2-Column Infographic Charts: Left = UnRunsheet (+PRA) by Zona (A, B, C), Right = SLA Aging Bar
                 chart_c1, chart_c2 = st.columns([1, 1.55])
 
                 with chart_c1:
-                    comp_labels = [
-                        "Success / Return",
-                        "UnRunsheet",
-                        "UnInbound",
-                        "Undelivery",
+                    df_unrun_zona = run_query(
+                        f"""
+                        SELECT 
+                            UPPER(TRIM(Zona)) AS zona_code,
+                            COUNT(DISTINCT AWB) AS total_awb
+                        FROM v_inbound {where_sql}
+                        AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA')
+                        AND UPPER(TRIM(Zona)) IN ('A', 'B', 'C')
+                        GROUP BY 1
+                        """
+                    )
+
+                    zona_map = (
+                        dict(zip(df_unrun_zona["zona_code"], df_unrun_zona["total_awb"]))
+                        if not df_unrun_zona.empty
+                        else {}
+                    )
+                    zona_labels = ["Zona A", "Zona B", "Zona C"]
+                    zona_values = [
+                        int(zona_map.get("A", 0)),
+                        int(zona_map.get("B", 0)),
+                        int(zona_map.get("C", 0)),
                     ]
-                    comp_values = [
-                        total_success,
-                        total_unrunsheet,
-                        total_uninbound,
-                        total_undel,
-                    ]
-                    if sum(comp_values) > 0:
+                    total_unrun_zona = sum(zona_values)
+
+                    if total_unrun_zona > 0:
                         fig_donut = px.pie(
-                            names=comp_labels,
-                            values=comp_values,
+                            names=zona_labels,
+                            values=zona_values,
                             hole=0.58,
-                            color=comp_labels,
+                            color=zona_labels,
                             color_discrete_map={
-                                "Success / Return": "#28a745",
-                                "UnRunsheet": "#dc3545",
-                                "UnInbound": "#ffc107",
-                                "Undelivery": "#6366f1",
+                                "Zona A": "#38bdf8",
+                                "Zona B": "#ffc107",
+                                "Zona C": "#dc3545",
                             },
                         )
                         fig_donut.update_traces(
+                            sort=False,
                             textposition="inside",
                             textinfo="percent",
-                            hovertemplate="<b>%{label}</b><br>Volume: %{value:,} AWB<br>Porsi: %{percent}<extra></extra>",
+                            hovertemplate="<b>%{label}</b><br>UnRunsheet (+PRA): %{value:,} AWB<br>Porsi: %{percent}<extra></extra>",
                         )
                         fig_donut.update_layout(
                             title=dict(
-                                text="<b>Komposisi Status Inbound</b>",
+                                text="<b>Komposisi UnRunsheet per Zona</b>",
                                 x=0,
                                 font=dict(size=15, color="#f8fafc"),
                             ),
                             annotations=[
                                 dict(
-                                    text=f"<b>{total_awb:,}</b><br><span style='font-size:11px;color:#94a3b8'>Total AWB</span>",
+                                    text=f"<b>{total_unrun_zona:,}</b><br><span style='font-size:11px;color:#94a3b8'>Total UnRunsheet</span>",
                                     x=0.5,
                                     y=0.5,
                                     font_size=16,
@@ -908,7 +895,7 @@ try:
                                 y=-0.22,
                                 xanchor="center",
                                 x=0.5,
-                                font=dict(size=11, color="#cbd5e1"),
+                                font=dict(size=12, color="#cbd5e1"),
                             ),
                             paper_bgcolor="rgba(15, 23, 42, 0.65)",
                             plot_bgcolor="rgba(0,0,0,0)",
@@ -916,6 +903,8 @@ try:
                             height=350,
                         )
                         st.plotly_chart(fig_donut, use_container_width=True)
+                    else:
+                        st.info("Tidak ada data UnRunsheet pada Zona A, B, atau C.")
 
                 with chart_c2:
                     if not df_aging.empty:
@@ -1523,28 +1512,25 @@ try:
                         col_color_list, col_font_list = [], []
                         for row_idx in range(n_rows):
                             val = pivot_with_total[col].iloc[row_idx]
-                            # Baris paling bawah (Grand Total)
                             if row_idx == n_rows - 1:
                                 col_color_list.append("#0f172a")
                                 col_font_list.append(
                                     "#38bdf8" if col == "Grand Total" else "#ffffff"
                                 )
-                            # Kolom Cabang & Kolom Grand Total
                             elif col in ["Cabang", "Grand Total"]:
                                 col_color_list.append("#1e293b")
                                 col_font_list.append(
                                     "#38bdf8" if col == "Grand Total" else "#ffffff"
                                 )
-                            # Kolom Aging SLA (Warna berdasarkan usia SLA jika volume > 0)
                             else:
                                 if val <= 0:
                                     col_color_list.append("#1e293b")
                                     col_font_list.append("#64748b")
                                 elif col == "H+0":
-                                    col_color_list.append("#28a745")  # Hijau
+                                    col_color_list.append("#28a745")
                                     col_font_list.append("#ffffff")
                                 elif col in ["H+1", "H+2"]:
-                                    col_color_list.append("#ffc107")  # Kuning
+                                    col_color_list.append("#ffc107")
                                     col_font_list.append("#000000")
                                 elif col in [
                                     "H+3",
@@ -1554,7 +1540,7 @@ try:
                                     "H+7",
                                     ">H+7",
                                 ]:
-                                    col_color_list.append("#dc3545")  # Merah
+                                    col_color_list.append("#dc3545")
                                     col_font_list.append("#ffffff")
                                 else:
                                     col_color_list.append("#1e293b")
@@ -1563,14 +1549,12 @@ try:
                         font_colors.append(col_font_list)
 
                     st.markdown(
-                        """
-                        <div class="sla-legend">
-                            <span><i class="dot-green"></i><b>H+0</b>: Hijau (Fresh / On-Time)</span>
-                            <span><i class="dot-yellow"></i><b>H+1 – H+2</b>: Kuning (Warning SLA)</span>
-                            <span><i class="dot-red"></i><b>H+3 – &gt;H+7</b>: Merah (Overdue / Critical)</span>
-                            <span><i class="dot-zero"></i><b>0</b>: Tidak Ada Backlog</span>
-                        </div>
-                        """,
+                        '<div class="sla-legend">'
+                        '<span><i class="dot-green"></i><b>H+0</b>: Hijau (Fresh / On-Time)</span>'
+                        '<span><i class="dot-yellow"></i><b>H+1 – H+2</b>: Kuning (Warning SLA)</span>'
+                        '<span><i class="dot-red"></i><b>H+3 – &gt;H+7</b>: Merah (Overdue / Critical)</span>'
+                        '<span><i class="dot-zero"></i><b>0</b>: Tidak Ada Backlog</span>'
+                        "</div>",
                         unsafe_allow_html=True,
                     )
 
