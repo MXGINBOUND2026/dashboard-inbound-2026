@@ -96,7 +96,7 @@ st.markdown(
     gap: 6px;
 }
 .kpi-label {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -110,14 +110,14 @@ st.markdown(
     white-space: nowrap;
 }
 .kpi-value {
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 800;
     color: #f8fafc;
     line-height: 1.15;
-    margin: 4px 0 8px 0;
+    margin: 4px 0 6px 0;
 }
 .kpi-sub {
-    font-size: 12px;
+    font-size: 11.5px;
     color: #cbd5e1;
     margin-bottom: 8px;
 }
@@ -154,9 +154,20 @@ st.markdown(
     border-radius: 8px;
     margin-bottom: 8px;
 }
+.kpi-ref-box {
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid #334155;
+    border-left: 4px solid #38bdf8;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #e2e8f0;
+    margin-bottom: 8px;
+}
 .dot-green { display:inline-block; width:10px; height:10px; background:#28a745; border-radius:2px; margin-right:5px; }
 .dot-yellow { display:inline-block; width:10px; height:10px; background:#ffc107; border-radius:2px; margin-right:5px; }
 .dot-red { display:inline-block; width:10px; height:10px; background:#dc3545; border-radius:2px; margin-right:5px; }
+.dot-blue { display:inline-block; width:10px; height:10px; background:#0284c7; border-radius:2px; margin-right:5px; }
 .dot-zero { display:inline-block; width:10px; height:10px; background:#1e293b; border:1px solid #475569; border-radius:2px; margin-right:5px; }
 </style>""",
     unsafe_allow_html=True,
@@ -178,6 +189,63 @@ AGING_COLOR_MAP = {
     "H+7": "#dc3545",
     ">H+7": "#dc3545",
 }
+
+LT_RUNNING_BUCKETS = [
+    "H+0 jam 00:00-12:00",
+    "H+0 jam 12:01-17:00",
+    "H+0 jam 17:01-23:59",
+    "H+1",
+    "H+2",
+    "H+3",
+    "H+4",
+    "H+5",
+    "H+6",
+    "H+7",
+    ">H+7",
+]
+
+H0_BUCKETS = [
+    "H+0 jam 00:00-12:00",
+    "H+0 jam 12:01-17:00",
+    "H+0 jam 17:01-23:59",
+]
+
+# =========================================================
+# KONFIGURASI TARGET KPI TERPUSAT (REG vs JTR/TRC vs CTC/YES)
+# =========================================================
+KPI_TARGETS_CONFIG = {
+    "REG": {
+        "Non COD": {
+            "A": {"H+0": 95.0, "H+1": 98.0},
+            "B": {"H+1": 95.0, "H+2": 98.0},
+            "C": {"H+1": 95.0, "H+2": 98.0},
+            "D": {"H+2": 95.0, "H+3": 98.0},
+        },
+        "COD": {
+            "A": {"H+1": 90.0, "H+3": 95.0},
+            "B": {"H+2": 90.0, "H+4": 95.0},
+            "C": {"H+2": 90.0, "H+4": 95.0},
+            "D": {"H+3": 90.0, "H+5": 95.0},
+        },
+    },
+    "JTR": {
+        "Non COD": {
+            "A": {"H+1": 90.0, "H+2": 95.0},
+            "B": {"H+2": 90.0, "H+3": 95.0},
+            "C": {"H+2": 90.0, "H+3": 95.0},
+            "D": {"H+3": 90.0, "H+4": 95.0},
+        },
+        "COD": {
+            "A": {"H+2": 90.0, "H+4": 95.0},
+            "B": {"H+3": 90.0, "H+5": 95.0},
+            "C": {"H+3": 90.0, "H+5": 95.0},
+            "D": {"H+4": 90.0, "H+6": 95.0},
+        },
+    },
+    "CTC": {"H+0": 95.0, "H+1": 99.0},
+    "YES": {"H+0": 95.0, "H+1": 99.0},
+}
+
 EXEC_PASSWORD = (
     st.secrets.get("SUMMARY_EXEC_PASS", "MXG125")
     if hasattr(st, "secrets")
@@ -274,6 +342,7 @@ def render_kpi_card(
     accent_color="#38bdf8",
     pill_text=None,
     progress_pct=None,
+    value_color="#f8fafc",
 ):
     pct_clamped = (
         max(0.0, min(100.0, float(progress_pct)))
@@ -281,7 +350,7 @@ def render_kpi_card(
         else 0.0
     )
     pill_html = (
-        f'<span class="kpi-pill" style="background:{accent_color}22; color:{accent_color}; border:1px solid {accent_color}55;">{pill_text}</span>'
+        f'<span class="kpi-pill" style="background:{accent_color}22; color:{accent_color}; border:1px solid {accent_color}66;">{pill_text}</span>'
         if pill_text
         else ""
     )
@@ -293,11 +362,112 @@ def render_kpi_card(
     return (
         f'<div class="kpi-card" style="border-top: 3px solid {accent_color};">'
         f'<div class="kpi-top"><span class="kpi-label">{title}</span>{pill_html}</div>'
-        f'<div class="kpi-value">{value_str}</div>'
+        f'<div class="kpi-value" style="color:{value_color};">{value_str}</div>'
         f'<div class="kpi-sub">{sub_str}</div>'
         f"{bar_html}"
         f"</div>"
     )
+
+
+def get_kpi_status_visual(actual_pct, target_pct):
+    """
+    Menentukan warna & label status card berdasarkan capaian vs target KPI:
+    - Hijau (#28a745): >= Target KPI
+    - Kuning (#ffc107): Warning (Target - 5% <= Capaian < Target)
+    - Merah (#dc3545): Below Target (Capaian < Target - 5%)
+    """
+    diff = actual_pct - target_pct
+    if actual_pct >= target_pct:
+        return ("#28a745", f"ON TARGET ({diff:+.2f}%)", "#4ade80")
+    elif actual_pct >= (target_pct - 5.0):
+        return ("#ffc107", f"WARNING ({diff:+.2f}%)", "#facc15")
+    else:
+        return ("#dc3545", f"BELOW ({diff:+.2f}%)", "#f87171")
+
+
+# =========================================================
+# HELPER KPI TARGET & ALERT COLOR ENGINE (RUNNING-IN-TOTAL)
+# =========================================================
+def get_kpi_targets_for_row(mode, zona_code, pay_mode="Non COD", service_group="REG"):
+    """
+    Mengembalikan dict {bucket_name: target_pct} sesuai kombinasi Service (REG vs JTR),
+    Type Kiriman (Non COD vs COD), dan Zona (A, B, C, D).
+    """
+    z = str(zona_code).strip().upper()
+    if z not in ("A", "B", "C", "D"):
+        z = "B"
+
+    if mode in ("CTC", "YES"):
+        raw_t = KPI_TARGETS_CONFIG[mode]
+    else:
+        svc_key = "JTR" if service_group == "JTR" else "REG"
+        pay_key = "COD" if pay_mode == "COD" else "Non COD"
+        raw_t = KPI_TARGETS_CONFIG[svc_key][pay_key][z]
+
+    expanded_targets = {}
+    for k, v in raw_t.items():
+        if k == "H+0":
+            for hb in H0_BUCKETS:
+                expanded_targets[hb] = v
+        else:
+            expanded_targets[k] = v
+    return expanded_targets
+
+
+def evaluate_kpi_cell_style(val_pct, bucket_name, targets_dict, is_parent_row=False):
+    if pd.isna(val_pct):
+        return ("#0f172a" if is_parent_row else "#1e293b", "#64748b")
+
+    final_target = max(targets_dict.values()) if targets_dict else 95.0
+    target_indices = [
+        LT_RUNNING_BUCKETS.index(k)
+        for k in targets_dict.keys()
+        if k in LT_RUNNING_BUCKETS
+    ]
+    max_target_idx = max(target_indices) if target_indices else 3
+    curr_idx = (
+        LT_RUNNING_BUCKETS.index(bucket_name)
+        if bucket_name in LT_RUNNING_BUCKETS
+        else max_target_idx + 1
+    )
+
+    if bucket_name in targets_dict:
+        tgt = targets_dict[bucket_name]
+        if val_pct >= tgt:
+            return ("#15803d" if is_parent_row else "#28a745", "#ffffff")
+        elif val_pct >= (tgt - 5.0):
+            return (
+                "#b45309" if is_parent_row else "#ffc107",
+                "#ffffff" if is_parent_row else "#000000",
+            )
+        else:
+            return ("#991b1b" if is_parent_row else "#dc3545", "#ffffff")
+    elif curr_idx < max_target_idx:
+        next_targets = [
+            targets_dict[LT_RUNNING_BUCKETS[i]]
+            for i in range(curr_idx + 1, max_target_idx + 1)
+            if LT_RUNNING_BUCKETS[i] in targets_dict
+        ]
+        next_tgt = next_targets[0] if next_targets else final_target
+        if val_pct >= next_tgt:
+            return ("#15803d" if is_parent_row else "#28a745", "#ffffff")
+        elif val_pct >= (next_tgt - 10.0):
+            return (
+                "#b45309" if is_parent_row else "#ffc107",
+                "#ffffff" if is_parent_row else "#000000",
+            )
+        else:
+            return ("#7f1d1d" if is_parent_row else "#991b1b", "#fecaca")
+    else:
+        if val_pct >= final_target:
+            return ("#0369a1" if is_parent_row else "#0284c7", "#ffffff")
+        elif val_pct >= (final_target - 5.0):
+            return (
+                "#b45309" if is_parent_row else "#ffc107",
+                "#ffffff" if is_parent_row else "#000000",
+            )
+        else:
+            return ("#991b1b" if is_parent_row else "#dc3545", "#ffffff")
 
 
 # =========================================================
@@ -327,11 +497,19 @@ if not os.path.exists(LOCAL_PARQUET_PATH):
 
 
 try:
+    schema_cols = (
+        ensure_view().execute("DESCRIBE v_inbound").fetchdf()["column_name"].tolist()
+    )
+    has_new_schema = all(
+        col in schema_cols
+        for col in ["Type_Shipment", "lt_inbound_bucket", "lt_entry_bucket"]
+    )
+
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Filter Data Dashboard")
 
     @st.cache_data(ttl=3600, show_spinner=False)
-    def get_filter_options():
+    def get_filter_options(schema_ready):
         con = ensure_view()
         locs = (
             con.execute(
@@ -375,6 +553,15 @@ try:
             .fetchdf()["HRS"]
             .tolist()
         )
+        types = (
+            con.execute(
+                "SELECT DISTINCT Type_Shipment FROM v_inbound WHERE Type_Shipment IS NOT NULL ORDER BY 1"
+            )
+            .fetchdf()["Type_Shipment"]
+            .tolist()
+            if schema_ready
+            else []
+        )
 
         minmax = con.execute(
             """
@@ -383,7 +570,7 @@ try:
             """
         ).fetchdf()
 
-        return locs, cab, zon, kec, stat, hrs, minmax
+        return locs, cab, zon, kec, stat, hrs, types, minmax
 
     (
         unique_locations,
@@ -392,8 +579,9 @@ try:
         unique_kecamatan,
         unique_status,
         unique_hrs,
+        unique_type_shipment,
         min_max_date,
-    ) = get_filter_options()
+    ) = get_filter_options(has_new_schema)
 
     allowed_cabang_list = [
         "Malang",
@@ -437,6 +625,11 @@ try:
         chosen_kecamatan = st.multiselect("📍 Filter Kecamatan:", unique_kecamatan)
         chosen_status = st.multiselect("📦 Filter Shipment Status:", unique_status)
         chosen_hrs = st.multiselect("📋 Filter Status HRS:", unique_hrs)
+        chosen_type = (
+            st.multiselect("🏷️ Filter Type Shipment:", unique_type_shipment)
+            if has_new_schema
+            else []
+        )
 
         submit_filter = st.form_submit_button(
             "🚀 Terapkan Filter", use_container_width=True
@@ -467,6 +660,8 @@ try:
         where_clauses_general.append(build_in_clause("Kecamatan", chosen_kecamatan))
     if chosen_hrs:
         where_clauses_general.append(build_in_clause("HRS", chosen_hrs))
+    if chosen_type and has_new_schema:
+        where_clauses_general.append(build_in_clause("Type_Shipment", chosen_type))
 
     where_clauses_full = list(where_clauses_general)
     if chosen_status:
@@ -483,7 +678,6 @@ try:
         else "WHERE 1=1"
     )
 
-    # Fetch Last Update timestamp once for Hero Header
     max_date_df = run_query(
         """
         SELECT MAX(COALESCE(
@@ -509,6 +703,12 @@ try:
         f"</div>",
         unsafe_allow_html=True,
     )
+
+    if not has_new_schema:
+        st.warning(
+            "⚠️ File Parquet saat ini belum memiliki kolom `Type_Shipment` & `TGL_ENTRY`. "
+            "Jalankan ulang `convert_to_parquet.py` lalu klik **🔄 Refresh & Tarik Data Terbaru** di sidebar."
+        )
 
     tab1, tab2 = st.tabs(["📊 Main Dashboard", "🔒 Summary Exec"])
 
@@ -549,7 +749,6 @@ try:
             if "selected_aging_card" not in st.session_state:
                 st.session_state.selected_aging_card = None
 
-            # Single-pass aggregation query (ultra-lightweight RAM)
             metrics_res = run_query(
                 f"""
                 SELECT 
@@ -573,7 +772,6 @@ try:
             total_unrunsheet_pra = int(r_m["total_unrunsheet_pra"] or 0)
             total_success = int(r_m["total_success"] or 0)
             total_return = int(r_m["total_return"] or 0)
-            total_undel = int(r_m["total_undel"] or 0)
             total_success_unhrs = int(r_m["total_success_unhrs"] or 0)
             total_undel_unhrs = int(r_m["total_undel_unhrs"] or 0)
 
@@ -591,7 +789,6 @@ try:
                 else 0.0
             )
 
-            # Row 1: 4 Primary Infographic KPI Cards
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.markdown(
@@ -666,7 +863,6 @@ try:
                     st.session_state.active_card_filter = "UnRunsheet with PRA"
                     st.rerun()
 
-            # Row 2: UnHRS Audit Cards
             col_m1, col_m2 = st.columns(2)
             with col_m1:
                 st.markdown(
@@ -705,7 +901,6 @@ try:
                     st.session_state.active_card_filter = "Undel UnHRS"
                     st.rerun()
 
-            # Active Card Drilldown (Only queries DuckDB when explicitly triggered)
             if st.session_state.active_card_filter:
                 card_title = st.session_state.active_card_filter
                 with st.expander(
@@ -726,9 +921,10 @@ try:
                     else:
                         card_query_filter = "1=1"
 
+                    type_col_sql = "Type_Shipment, " if has_new_schema else ""
                     df_card_detail_full = run_query(
                         f"""
-                        SELECT AWB, Last_Inbound, TGL_UPDATE_STATUS_POD, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
+                        SELECT AWB, {type_col_sql}Last_Inbound, TGL_UPDATE_STATUS_POD, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Zona, Kecamatan, SERVICE, Status_Shipment, HRS, RUNSHEET_COURIER_NAME
                         FROM v_inbound {where_sql} AND {card_query_filter}
                         ORDER BY age_days DESC
                         """
@@ -790,7 +986,6 @@ try:
                     """
                 )
 
-                # Interactive Aging Selector Strip
                 st.caption(
                     "🎯 **Filter Cepat Kategori Aging** (Klik kategori untuk memfilter tabel wilayah & detail di bawah):"
                 )
@@ -826,7 +1021,6 @@ try:
                         f"📌 Filter Aging Aktif: **{selected_aging_filter}** (Klik 'All' untuk reset)"
                     )
 
-                # 2-Column Infographic Charts: Left = UnRunsheet (+PRA) by Zona (A, B, C), Right = SLA Aging Bar
                 chart_c1, chart_c2 = st.columns([1, 1.55])
 
                 with chart_c1:
@@ -947,7 +1141,6 @@ try:
                         )
                         st.plotly_chart(fig_bar, use_container_width=True)
 
-                # Top 5 Kecamatan Bottleneck Horizontal Infographic Bar
                 if not top_kec_df.empty:
                     top_kec_sorted = top_kec_df.sort_values("total", ascending=True)
                     fig_top = px.bar(
@@ -1142,7 +1335,6 @@ try:
                             use_container_width=True,
                         )
 
-                # RAM Optimization: Lazy load raw AWB table only when requested
                 with st.expander(
                     "📋 Detail AWB UnRunsheet & Export CSV (On-Demand Hemat RAM)",
                     expanded=False,
@@ -1153,9 +1345,10 @@ try:
                         key="chk_load_detail_unrun",
                     )
                     if load_detail_unrun:
+                        type_col_sql = "Type_Shipment, " if has_new_schema else ""
                         df_detail_full = run_query(
                             f"""
-                            SELECT AWB, Last_Inbound, WUS_DATE, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
+                            SELECT AWB, {type_col_sql}Last_Inbound, WUS_DATE, RUNSHEET_NO, payment_type, age_days AS "Aging (Hari)", LAST_LOCATION, Cabang, Kecamatan, SERVICE, Status_Shipment, HRS, POD_Category, POD_DESC, WUS_REMARKS, RUNSHEET_COURIER_NAME
                             FROM v_inbound {where_sql} {unrunsheet_status_clause} {aging_click_clause}
                             ORDER BY age_days DESC
                             """
@@ -1181,9 +1374,10 @@ try:
                     '<div class="section-banner">⚠️ Detail Data UnInbound</div>',
                     unsafe_allow_html=True,
                 )
+                type_col_sql = "Type_Shipment, " if has_new_schema else ""
                 df_uninbound_full = run_query(
                     f"""
-                    SELECT AWB, Cabang, Zona, Kecamatan, RUNSHEET_NO, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
+                    SELECT AWB, {type_col_sql}Cabang, Zona, Kecamatan, RUNSHEET_NO, payment_type, age_days AS "Aging from OM/HVO (Hari)", SERVICE, Status_Shipment, HRS
                     FROM v_inbound {where_sql} AND Status_Shipment = 'UnInbound'
                     ORDER BY age_days DESC
                     """
@@ -1332,6 +1526,753 @@ try:
                             undel_c_pct,
                         ),
                         unsafe_allow_html=True,
+                    )
+
+                st.markdown("---")
+
+                # =========================================================
+                # GRAFIK SLA LEAD TIME (% RUNNING IN TOTAL) + KPI HIGHLIGHTS
+                # =========================================================
+                st.markdown(
+                    '<div class="section-banner">🎯 Lead Time SLA Delivery (% Running in Total vs Target KPI)</div>',
+                    unsafe_allow_html=True,
+                )
+
+                if not has_new_schema:
+                    st.info(
+                        "Silakan perbarui file Parquet dengan `convert_to_parquet.py` terbaru untuk menampilkan 3 matriks Lead Time SLA (% Running in Total)."
+                    )
+                else:
+                    # ---------------------------------------------------------
+                    # KPI HIGHLIGHT CARDS PER SERVICE (REG vs JTR vs CTC vs YES)
+                    # ---------------------------------------------------------
+                    col_hl_title, col_hl_zona = st.columns([2.1, 1.4])
+                    with col_hl_title:
+                        st.markdown(
+                            "#### 🏆 Highlight Capaian KPI Lead Time (% Running in Total)"
+                        )
+                    with col_hl_zona:
+                        hl_zona_opt = st.radio(
+                            "Pilih Acuan Zona KPI Card:",
+                            ["All Zona", "Zona A", "Zona B", "Zona C", "Zona D"],
+                            index=0,
+                            horizontal=True,
+                            key="hl_zona_selector",
+                        )
+
+                    hl_zona_sql = (
+                        "AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C', 'D')"
+                        if hl_zona_opt == "All Zona"
+                        else f"AND UPPER(TRIM(COALESCE(Zona, ''))) = '{hl_zona_opt.replace('Zona ', '')}'"
+                    )
+                    hl_z_ref = (
+                        "A"
+                        if hl_zona_opt in ("All Zona", "Zona A")
+                        else hl_zona_opt.replace("Zona ", "")
+                    )
+
+                    h0_in_sql = "'H+0 jam 00:00-12:00', 'H+0 jam 12:01-17:00', 'H+0 jam 17:01-23:59'"
+                    h1_in_sql = f"{h0_in_sql}, 'H+1'"
+                    h2_in_sql = f"{h1_in_sql}, 'H+2'"
+                    h3_in_sql = f"{h2_in_sql}, 'H+3'"
+                    h4_in_sql = f"{h3_in_sql}, 'H+4'"
+
+                    reg_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%REG%'"
+                    jtr_cond = "(UPPER(COALESCE(SERVICE, '')) LIKE '%JTR%' OR UPPER(COALESCE(SERVICE, '')) LIKE '%TRC%')"
+                    ctc_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%CTC%'"
+                    yes_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%YES%'"
+
+                    hl_query = f"""
+                        SELECT
+                            -- REG Non COD
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' THEN AWB END) AS reg_ncod_tot,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS reg_ncod_h0,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_ncod_h1,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_ncod_h2,
+
+                            -- REG COD
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' THEN AWB END) AS reg_cod_tot,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_cod_h1,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_cod_h2,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS reg_cod_h3,
+                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS reg_cod_h4,
+
+                            -- JTR (JTR & TRC) Non COD
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' THEN AWB END) AS jtr_ncod_tot,
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_ncod_h1,
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_ncod_h2,
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_ncod_h3,
+
+                            -- JTR (JTR & TRC) COD
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' THEN AWB END) AS jtr_cod_tot,
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_cod_h2,
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_cod_h3,
+                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS jtr_cod_h4,
+
+                            -- CTC (Entry -> Delivered)
+                            COUNT(DISTINCT CASE WHEN {ctc_cond} THEN AWB END) AS ctc_tot,
+                            COUNT(DISTINCT CASE WHEN {ctc_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS ctc_h0,
+                            COUNT(DISTINCT CASE WHEN {ctc_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS ctc_h1,
+
+                            -- YES (Entry -> Delivered)
+                            COUNT(DISTINCT CASE WHEN {yes_cond} THEN AWB END) AS yes_tot,
+                            COUNT(DISTINCT CASE WHEN {yes_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS yes_h0,
+                            COUNT(DISTINCT CASE WHEN {yes_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS yes_h1
+                        FROM v_inbound
+                        {where_sql}
+                          AND Status_Shipment = 'SUCCESS DELIVERY'
+                          AND Type_Shipment = 'TRANSACTION'
+                          {hl_zona_sql}
+                    """
+
+                    df_hl = run_query(hl_query)
+                    if not df_hl.empty:
+                        hr = df_hl.iloc[0]
+
+                        def calc_pct(num_col, den_col):
+                            den = float(hr[den_col] or 0)
+                            num = float(hr[num_col] or 0)
+                            return (num / den * 100.0) if den > 0 else 0.0, int(den)
+
+                        # Sesuaikan milestone KPI REG & JTR berdasarkan Zona yang dipilih
+                        if hl_z_ref == "A":
+                            reg_ncod_m1 = ("H+0", calc_pct("reg_ncod_h0", "reg_ncod_tot"), 95.0)
+                            reg_ncod_m2 = ("H+1", calc_pct("reg_ncod_h1", "reg_ncod_tot"), 98.0)
+                            reg_cod_m1 = ("H+1", calc_pct("reg_cod_h1", "reg_cod_tot"), 90.0)
+                            reg_cod_m2 = ("H+3", calc_pct("reg_cod_h3", "reg_cod_tot"), 95.0)
+
+                            jtr_ncod_m1 = ("H+1", calc_pct("jtr_ncod_h1", "jtr_ncod_tot"), 90.0)
+                            jtr_ncod_m2 = ("H+2", calc_pct("jtr_ncod_h2", "jtr_ncod_tot"), 95.0)
+                            jtr_cod_m1 = ("H+2", calc_pct("jtr_cod_h2", "jtr_cod_tot"), 90.0)
+                            jtr_cod_m2 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 95.0)
+                        elif hl_z_ref in ("B", "C"):
+                            reg_ncod_m1 = ("H+1", calc_pct("reg_ncod_h1", "reg_ncod_tot"), 95.0)
+                            reg_ncod_m2 = ("H+2", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 98.0)
+                            reg_cod_m1 = ("H+2", calc_pct("reg_cod_h2", "reg_cod_tot"), 90.0)
+                            reg_cod_m2 = ("H+4", calc_pct("reg_cod_h4", "reg_cod_tot"), 95.0)
+
+                            jtr_ncod_m1 = ("H+2", calc_pct("jtr_ncod_h2", "jtr_ncod_tot"), 90.0)
+                            jtr_ncod_m2 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 95.0)
+                            jtr_cod_m1 = ("H+3", calc_pct("jtr_cod_h3", "jtr_cod_tot"), 90.0)
+                            jtr_cod_m2 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 95.0)
+                        else:  # Zona D
+                            reg_ncod_m1 = ("H+2", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 95.0)
+                            reg_ncod_m2 = ("H+3", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 98.0)
+                            reg_cod_m1 = ("H+3", calc_pct("reg_cod_h3", "reg_cod_tot"), 90.0)
+                            reg_cod_m2 = ("H+4", calc_pct("reg_cod_h4", "reg_cod_tot"), 95.0)
+
+                            jtr_ncod_m1 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 90.0)
+                            jtr_ncod_m2 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 95.0)
+                            jtr_cod_m1 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 90.0)
+                            jtr_cod_m2 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 95.0)
+
+                        def build_hl_card_html(card_title, milestone_lbl, pct_vol_tuple, target_val):
+                            actual_val, vol_cnt = pct_vol_tuple
+                            accent_c, pill_txt, val_c = get_kpi_status_visual(
+                                actual_val, target_val
+                            )
+                            return render_kpi_card(
+                                title=f"{card_title} ({milestone_lbl})",
+                                value_str=f"{actual_val:.2f}%",
+                                sub_str=f"Target KPI: <b>{target_val:.0f}%</b> &nbsp;|&nbsp; Vol: <b>{vol_cnt:,}</b> AWB",
+                                accent_color=accent_c,
+                                pill_text=pill_txt,
+                                progress_pct=actual_val,
+                                value_color=val_c,
+                            )
+
+                        # Baris 1: KPI Highlight Service REG
+                        r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+                        r1_c1.markdown(
+                            build_hl_card_html(
+                                "REG Non COD", reg_ncod_m1[0], reg_ncod_m1[1], reg_ncod_m1[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r1_c2.markdown(
+                            build_hl_card_html(
+                                "REG Non COD", reg_ncod_m2[0], reg_ncod_m2[1], reg_ncod_m2[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r1_c3.markdown(
+                            build_hl_card_html(
+                                "REG COD", reg_cod_m1[0], reg_cod_m1[1], reg_cod_m1[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r1_c4.markdown(
+                            build_hl_card_html(
+                                "REG COD", reg_cod_m2[0], reg_cod_m2[1], reg_cod_m2[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                        # Baris 2: KPI Highlight Service JTR (JTR & TRC)
+                        r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+                        r2_c1.markdown(
+                            build_hl_card_html(
+                                "JTR Non COD", jtr_ncod_m1[0], jtr_ncod_m1[1], jtr_ncod_m1[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r2_c2.markdown(
+                            build_hl_card_html(
+                                "JTR Non COD", jtr_ncod_m2[0], jtr_ncod_m2[1], jtr_ncod_m2[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r2_c3.markdown(
+                            build_hl_card_html(
+                                "JTR COD", jtr_cod_m1[0], jtr_cod_m1[1], jtr_cod_m1[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r2_c4.markdown(
+                            build_hl_card_html(
+                                "JTR COD", jtr_cod_m2[0], jtr_cod_m2[1], jtr_cod_m2[2]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                        # Baris 3: KPI Highlight CTC (Intracity) & YES
+                        r3_c1, r3_c2, r3_c3, r3_c4 = st.columns(4)
+                        r3_c1.markdown(
+                            build_hl_card_html(
+                                "CTC Intracity", "H+0", calc_pct("ctc_h0", "ctc_tot"), 95.0
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r3_c2.markdown(
+                            build_hl_card_html(
+                                "CTC Intracity", "H+1", calc_pct("ctc_h1", "ctc_tot"), 99.0
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r3_c3.markdown(
+                            build_hl_card_html(
+                                "YES Express", "H+0", calc_pct("yes_h0", "yes_tot"), 95.0
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        r3_c4.markdown(
+                            build_hl_card_html(
+                                "YES Express", "H+1", calc_pct("yes_h1", "yes_tot"), 99.0
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+                    # ---------------------------------------------------------
+                    # FUNGSI MATRIX & S-CURVE % RUNNING IN TOTAL
+                    # ---------------------------------------------------------
+                    def render_running_total_sla_block(
+                        block_key,
+                        section_title,
+                        mode,
+                        base_ts_col,
+                        bucket_col,
+                        service_filter_sql,
+                        default_expanded=True,
+                    ):
+                        with st.expander(section_title, expanded=default_expanded):
+                            if mode == "INBOUND":
+                                col_p1, col_p2, col_p3 = st.columns([1.4, 1.1, 1.3])
+                            else:
+                                col_p1, col_p2 = st.columns([1.5, 2.3])
+                                col_p3 = None
+
+                            with col_p1:
+                                period_granularity = st.radio(
+                                    "📅 Parameter Periode:",
+                                    ["Tanggal (Daily)", "Week (Weekly)", "Month (Monthly)"],
+                                    index=1,
+                                    horizontal=True,
+                                    key=f"gran_{block_key}",
+                                )
+
+                            if mode == "INBOUND":
+                                with col_p2:
+                                    pay_type_opt = st.radio(
+                                        "💳 Type Kiriman:",
+                                        ["Non COD", "COD", "All"],
+                                        index=0,
+                                        horizontal=True,
+                                        key=f"pay_{block_key}",
+                                    )
+                                with col_p3:
+                                    svc_rute_opt = st.radio(
+                                        "🚚 Service (KPI Berbeda):",
+                                        ["REG", "JTR (JTR & TRC)", "All"],
+                                        index=0,
+                                        horizontal=True,
+                                        key=f"svc_{block_key}",
+                                    )
+                            else:
+                                pay_type_opt = "All"
+                                svc_rute_opt = "All"
+
+                            svc_group_key = (
+                                "JTR" if svc_rute_opt == "JTR (JTR & TRC)" else "REG"
+                            )
+
+                            # Kotak Referensi Target KPI Dinamis sesuai pilihan Service (REG vs JTR)
+                            if mode == "INBOUND":
+                                if svc_group_key == "JTR":
+                                    kpi_info_html = (
+                                        "🎯 <b>Target KPI Service JTR (JTR &amp; TRC) — Latest Inbound - Delivered:</b><br>"
+                                        "&bull; <b>Non COD:</b> Zona A (<b>H+1: 90%</b>, <b>H+2: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona B &amp; C (<b>H+2: 90%</b>, <b>H+3: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona D (<b>H+3: 90%</b>, <b>H+4: 95%</b>)<br>"
+                                        "&bull; <b>COD:</b> Zona A (<b>H+2: 90%</b>, <b>H+4: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona B &amp; C (<b>H+3: 90%</b>, <b>H+5: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona D (<b>H+4: 90%</b>, <b>H+6: 95%</b>)"
+                                    )
+                                else:
+                                    kpi_info_html = (
+                                        "🎯 <b>Target KPI Service REG — Latest Inbound - Delivered:</b><br>"
+                                        "&bull; <b>Non COD:</b> Zona A (<b>H+0: 95%</b>, <b>H+1: 98%</b>) &nbsp;|&nbsp; "
+                                        "Zona B &amp; C (<b>H+1: 95%</b>, <b>H+2: 98%</b>) &nbsp;|&nbsp; "
+                                        "Zona D (<b>H+2: 95%</b>, <b>H+3: 98%</b>)<br>"
+                                        "&bull; <b>COD:</b> Zona A (<b>H+1: 90%</b>, <b>H+3: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona B &amp; C (<b>H+2: 90%</b>, <b>H+4: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona D (<b>H+3: 90%</b>, <b>H+5: 95%</b>)"
+                                    )
+                            elif mode == "CTC":
+                                kpi_info_html = (
+                                    "🎯 <b>Target KPI Entry/Handover - Delivered [CTC = Intracity]:</b> "
+                                    "All Type Kiriman &amp; All Zone &rarr; <b>H+0: 95%</b> &nbsp;|&nbsp; <b>H+1: 99%</b>"
+                                )
+                            else:
+                                kpi_info_html = (
+                                    "🎯 <b>Target KPI Entry/Handover - Delivered [Service YES]:</b> "
+                                    "All Type Kiriman &amp; All Zone &rarr; <b>H+0: 95%</b> &nbsp;|&nbsp; <b>H+1: 99%</b>"
+                                )
+
+                            if mode == "INBOUND":
+                                st.markdown(
+                                    f'<div class="kpi-ref-box">{kpi_info_html}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                with col_p2:
+                                    st.markdown(
+                                        f'<div class="kpi-ref-box">{kpi_info_html}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+
+                            extra_clauses = [
+                                "Status_Shipment = 'SUCCESS DELIVERY'",
+                                "Type_Shipment = 'TRANSACTION'",
+                            ]
+                            if service_filter_sql:
+                                extra_clauses.append(service_filter_sql)
+                            if mode == "INBOUND":
+                                if pay_type_opt in ("Non COD", "COD"):
+                                    extra_clauses.append(
+                                        f"payment_type = '{pay_type_opt}'"
+                                    )
+                                if svc_rute_opt == "REG":
+                                    extra_clauses.append(
+                                        "UPPER(COALESCE(SERVICE, '')) LIKE '%REG%'"
+                                    )
+                                elif svc_rute_opt == "JTR (JTR & TRC)":
+                                    extra_clauses.append(
+                                        "(UPPER(COALESCE(SERVICE, '')) LIKE '%JTR%' OR UPPER(COALESCE(SERVICE, '')) LIKE '%TRC%')"
+                                    )
+
+                            extra_sql = " AND ".join(extra_clauses)
+                            ts_expr = f"TRY_STRPTIME({base_ts_col}, '%m/%d/%Y %H:%M')"
+
+                            if period_granularity == "Tanggal (Daily)":
+                                p_label_sql = f"STRFTIME({ts_expr}, '%d %b %Y')"
+                                p_sort_sql = f"CAST({ts_expr} AS DATE)"
+                                period_col_header = "TANGGAL"
+                            elif period_granularity == "Week (Weekly)":
+                                p_label_sql = f"CONCAT('Week ', CAST(CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER) AS STRING))"
+                                p_sort_sql = f"EXTRACT(WEEK FROM {ts_expr})"
+                                period_col_header = "WEEK of YEAR"
+                            else:
+                                p_label_sql = f"STRFTIME({ts_expr}, '%b %Y')"
+                                p_sort_sql = f"STRFTIME({ts_expr}, '%Y-%m')"
+                                period_col_header = "MONTH"
+
+                            df_lt = run_query(
+                                f"""
+                                SELECT 
+                                    {p_label_sql} AS periode,
+                                    {p_sort_sql} AS sort_key,
+                                    UPPER(TRIM(COALESCE(Zona, 'UNKNOWN'))) AS zona_code,
+                                    {bucket_col} AS lt_bucket,
+                                    COUNT(DISTINCT AWB) AS awb_cnt
+                                FROM v_inbound
+                                {where_sql}
+                                  AND {extra_sql}
+                                  AND {ts_expr} IS NOT NULL
+                                  AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C', 'D')
+                                GROUP BY 1, 2, 3, 4
+                                ORDER BY sort_key ASC, zona_code ASC
+                                """
+                            )
+
+                            if df_lt.empty:
+                                st.info(
+                                    "Tidak ada data kiriman `SUCCESS DELIVERY` (`Type_Shipment = TRANSACTION`) pada filter yang dipilih."
+                                )
+                                return
+
+                            def compute_running_row(df_slice, label_txt, zona_ref, is_parent):
+                                total_vol = int(df_slice["awb_cnt"].sum())
+                                bucket_counts = (
+                                    df_slice.groupby("lt_bucket")["awb_cnt"]
+                                    .sum()
+                                    .to_dict()
+                                )
+                                cum_sum = 0
+                                row_vals = {
+                                    "Label": label_txt,
+                                    "ZonaRef": zona_ref,
+                                    "IsParent": is_parent,
+                                    "VolAWB": total_vol,
+                                }
+                                for b in LT_RUNNING_BUCKETS:
+                                    cnt = int(bucket_counts.get(b, 0))
+                                    cum_sum += cnt
+                                    pct = (
+                                        (cum_sum / total_vol * 100.0)
+                                        if total_vol > 0
+                                        else 0.0
+                                    )
+                                    row_vals[b] = pct
+                                row_vals["Total"] = (
+                                    (cum_sum / total_vol * 100.0)
+                                    if total_vol > 0
+                                    else 0.0
+                                )
+                                return row_vals
+
+                            periods_df = (
+                                df_lt[["periode", "sort_key"]]
+                                .drop_duplicates()
+                                .sort_values("sort_key")
+                            )
+
+                            matrix_rows = []
+                            curve_rows = []
+
+                            for _, p_row in periods_df.iterrows():
+                                p_name = p_row["periode"]
+                                df_p = df_lt[df_lt["periode"] == p_name]
+
+                                parent_r = compute_running_row(
+                                    df_p, f"▪ {p_name}", "B", is_parent=True
+                                )
+                                matrix_rows.append(parent_r)
+
+                                for z_code in ["A", "B", "C", "D"]:
+                                    df_pz = df_p[df_p["zona_code"] == z_code]
+                                    if not df_pz.empty:
+                                        child_r = compute_running_row(
+                                            df_pz,
+                                            f"    └ Zona {z_code}",
+                                            z_code,
+                                            is_parent=False,
+                                        )
+                                        matrix_rows.append(child_r)
+
+                            gt_row = compute_running_row(
+                                df_lt, "TOTAL KESELURUHAN", "B", is_parent=True
+                            )
+                            matrix_rows.append(gt_row)
+
+                            for z_code in ["A", "B", "C", "D"]:
+                                df_z_all = df_lt[df_lt["zona_code"] == z_code]
+                                if not df_z_all.empty:
+                                    z_summary = compute_running_row(
+                                        df_z_all, f"Zona {z_code}", z_code, False
+                                    )
+                                    for b in LT_RUNNING_BUCKETS:
+                                        curve_rows.append(
+                                            {
+                                                "Zona": f"Zona {z_code}",
+                                                "Bucket": b,
+                                                "RunningPct": round(z_summary[b], 2),
+                                            }
+                                        )
+
+                            df_matrix_disp = pd.DataFrame(matrix_rows)
+
+                            st.markdown(
+                                '<div class="sla-legend">'
+                                '<span><i class="dot-green"></i><b>Hijau</b>: Tercapai (≥ Target KPI)</span>'
+                                '<span><i class="dot-yellow"></i><b>Kuning</b>: Warning (Mendekati Target, -5%)</span>'
+                                '<span><i class="dot-red"></i><b>Merah</b>: Di Bawah Target KPI</span>'
+                                '<span><i class="dot-blue"></i><b>Biru</b>: Pasca Target Utama (Target Tercapai)</span>'
+                                "</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                            table_headers = (
+                                [period_col_header, "Vol AWB"]
+                                + LT_RUNNING_BUCKETS
+                                + ["Total"]
+                            )
+                            cell_texts = []
+                            cell_fills = []
+                            cell_fonts = []
+
+                            for col_name in table_headers:
+                                col_txt_list = []
+                                col_fill_list = []
+                                col_font_list = []
+
+                                for r_idx, r_data in df_matrix_disp.iterrows():
+                                    is_parent = bool(r_data["IsParent"])
+                                    is_grand_total = (
+                                        r_idx == len(df_matrix_disp) - 1
+                                    )
+                                    z_ref = r_data["ZonaRef"]
+
+                                    if col_name == period_col_header:
+                                        col_txt_list.append(
+                                            f"<b>{r_data['Label']}</b>"
+                                            if is_parent
+                                            else r_data["Label"]
+                                        )
+                                        col_fill_list.append(
+                                            "#0f172a"
+                                            if is_grand_total
+                                            else ("#1e3a5f" if is_parent else "#1e293b")
+                                        )
+                                        col_font_list.append(
+                                            "#38bdf8" if is_grand_total else "#f8fafc"
+                                        )
+                                    elif col_name == "Vol AWB":
+                                        vol_str = f"{int(r_data['VolAWB']):,}"
+                                        col_txt_list.append(
+                                            f"<b>{vol_str}</b>"
+                                            if is_parent
+                                            else vol_str
+                                        )
+                                        col_fill_list.append(
+                                            "#0f172a"
+                                            if is_grand_total
+                                            else ("#1e3a5f" if is_parent else "#1e293b")
+                                        )
+                                        col_font_list.append("#cbd5e1")
+                                    else:
+                                        val_num = float(r_data[col_name])
+                                        pct_str = f"{val_num:.2f}%"
+                                        col_txt_list.append(
+                                            f"<b>{pct_str}</b>"
+                                            if is_parent
+                                            else pct_str
+                                        )
+                                        targets_map = get_kpi_targets_for_row(
+                                            mode, z_ref, pay_type_opt, svc_group_key
+                                        )
+                                        bg_c, fg_c = evaluate_kpi_cell_style(
+                                            val_num,
+                                            col_name,
+                                            targets_map,
+                                            is_parent_row=is_parent,
+                                        )
+                                        col_fill_list.append(bg_c)
+                                        col_font_list.append(fg_c)
+
+                                cell_texts.append(col_txt_list)
+                                cell_fills.append(col_fill_list)
+                                cell_fonts.append(col_font_list)
+
+                            col_widths = (
+                                [1.45, 0.85]
+                                + [1.05, 1.05, 1.05]
+                                + [0.72] * 8
+                                + [0.80]
+                            )
+                            fig_lt_table = go.Figure(
+                                data=[
+                                    go.Table(
+                                        columnwidth=col_widths,
+                                        header=dict(
+                                            values=[
+                                                f"<b>{h}</b>" for h in table_headers
+                                            ],
+                                            fill_color="#0f172a",
+                                            line_color="#334155",
+                                            align=[
+                                                "left"
+                                                if h == period_col_header
+                                                else "center"
+                                                for h in table_headers
+                                            ],
+                                            font=dict(color="#f8fafc", size=11),
+                                            height=38,
+                                        ),
+                                        cells=dict(
+                                            values=cell_texts,
+                                            fill_color=cell_fills,
+                                            line_color="#334155",
+                                            align=[
+                                                "left"
+                                                if h == period_col_header
+                                                else "center"
+                                                for h in table_headers
+                                            ],
+                                            font=dict(color=cell_fonts, size=11),
+                                            height=28,
+                                        ),
+                                    )
+                                ]
+                            )
+                            fig_lt_table.update_layout(
+                                margin=dict(l=2, r=2, t=8, b=8),
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                height=min(
+                                    620, max(250, (len(df_matrix_disp) + 1) * 30 + 35)
+                                ),
+                            )
+                            st.plotly_chart(fig_lt_table, use_container_width=True)
+
+                            if curve_rows:
+                                df_curve = pd.DataFrame(curve_rows)
+                                fig_curve = px.line(
+                                    df_curve,
+                                    x="Bucket",
+                                    y="RunningPct",
+                                    color="Zona",
+                                    markers=True,
+                                    text="RunningPct",
+                                    color_discrete_map={
+                                        "Zona A": "#38bdf8",
+                                        "Zona B": "#28a745",
+                                        "Zona C": "#ffc107",
+                                        "Zona D": "#f43f5e",
+                                    },
+                                    labels={
+                                        "Bucket": "",
+                                        "RunningPct": "% Running in Total",
+                                    },
+                                )
+                                fig_curve.update_traces(
+                                    line=dict(width=2.8),
+                                    marker=dict(size=7),
+                                    texttemplate="%{text:.1f}%",
+                                    textposition="top center",
+                                    textfont=dict(size=10),
+                                )
+                                tgt_primary = (
+                                    90.0
+                                    if (
+                                        mode == "INBOUND"
+                                        and (
+                                            pay_type_opt == "COD"
+                                            or svc_group_key == "JTR"
+                                        )
+                                    )
+                                    else 95.0
+                                )
+                                tgt_secondary = (
+                                    95.0
+                                    if (
+                                        mode == "INBOUND"
+                                        and (
+                                            pay_type_opt == "COD"
+                                            or svc_group_key == "JTR"
+                                        )
+                                    )
+                                    else (98.0 if mode == "INBOUND" else 99.0)
+                                )
+                                fig_curve.add_hline(
+                                    y=tgt_primary,
+                                    line_dash="dash",
+                                    line_color="#ffc107",
+                                    annotation_text=f"KPI Milestone 1: {tgt_primary:.0f}%",
+                                    annotation_font_color="#ffc107",
+                                )
+                                fig_curve.add_hline(
+                                    y=tgt_secondary,
+                                    line_dash="dot",
+                                    line_color="#28a745",
+                                    annotation_text=f"KPI Milestone 2: {tgt_secondary:.0f}%",
+                                    annotation_font_color="#28a745",
+                                )
+                                fig_curve.update_layout(
+                                    title=dict(
+                                        text="<b>📈 Kurva Kumulatif % Running in Total per Zona</b>",
+                                        x=0,
+                                        font=dict(size=14, color="#f8fafc"),
+                                    ),
+                                    xaxis=dict(
+                                        categoryorder="array",
+                                        categoryarray=LT_RUNNING_BUCKETS,
+                                        tickfont=dict(color="#cbd5e1", size=11),
+                                    ),
+                                    yaxis=dict(
+                                        range=[0, 106],
+                                        showgrid=True,
+                                        gridcolor="rgba(148, 163, 184, 0.15)",
+                                        tickfont=dict(color="#cbd5e1"),
+                                    ),
+                                    legend=dict(
+                                        orientation="h",
+                                        yanchor="bottom",
+                                        y=1.02,
+                                        xanchor="right",
+                                        x=1,
+                                        font=dict(color="#f8fafc"),
+                                    ),
+                                    plot_bgcolor="rgba(15, 23, 42, 0.7)",
+                                    paper_bgcolor="rgba(15, 23, 42, 0.7)",
+                                    margin=dict(l=15, r=15, t=50, b=20),
+                                    height=330,
+                                )
+                                st.plotly_chart(fig_curve, use_container_width=True)
+
+                            export_df = df_matrix_disp.drop(
+                                columns=["ZonaRef", "IsParent"]
+                            ).rename(columns={"Label": period_col_header})
+                            st.download_button(
+                                label=f"📥 Download CSV {section_title.split('—')[0].strip()}",
+                                data=export_df.to_csv(index=False).encode("utf-8"),
+                                file_name=f"SLA_Running_Total_{block_key}_{svc_group_key}.csv",
+                                mime="text/csv",
+                                key=f"dl_{block_key}",
+                            )
+
+                    # 1. Grafik Utama: Latest Inbound -> TGL_UPDATE_STATUS_POD (REG vs JTR/TRC)
+                    render_running_total_sla_block(
+                        block_key="inbound_delivered",
+                        section_title="📊 1. SLA Lead Time: Latest Inbound - Delivered (REG vs JTR/TRC | TRANSACTION)",
+                        mode="INBOUND",
+                        base_ts_col="Last_Inbound",
+                        bucket_col="lt_inbound_bucket",
+                        service_filter_sql="",
+                        default_expanded=True,
+                    )
+
+                    # 2. Grafik Khusus CTC (Intracity): TGL_ENTRY -> TGL_UPDATE_STATUS_POD
+                    render_running_total_sla_block(
+                        block_key="ctc_entry_delivered",
+                        section_title="📊 2. SLA Lead Time CTC (Intracity): TGL_ENTRY - Delivered (TRANSACTION | SUCCESS DELIVERY)",
+                        mode="CTC",
+                        base_ts_col="TGL_ENTRY",
+                        bucket_col="lt_entry_bucket",
+                        service_filter_sql="UPPER(COALESCE(SERVICE, '')) LIKE '%CTC%'",
+                        default_expanded=True,
+                    )
+
+                    # 3. Grafik Khusus YES: TGL_ENTRY -> TGL_UPDATE_STATUS_POD
+                    render_running_total_sla_block(
+                        block_key="yes_entry_delivered",
+                        section_title="📊 3. SLA Lead Time YES: TGL_ENTRY - Delivered (TRANSACTION | SUCCESS DELIVERY)",
+                        mode="YES",
+                        base_ts_col="TGL_ENTRY",
+                        bucket_col="lt_entry_bucket",
+                        service_filter_sql="UPPER(COALESCE(SERVICE, '')) LIKE '%YES%'",
+                        default_expanded=True,
                     )
 
                 st.markdown("---")
@@ -1529,7 +2470,6 @@ try:
 
                 # =========================================================
                 # MATRIX INFOGRAFIS WARNA BERDASARKAN USIA SLA (H+0..>H+7)
-                # H+0 = Hijau | H+1 & H+2 = Kuning | H+3 s/d >H+7 = Merah
                 # =========================================================
                 def render_sla_matrix_table(
                     df_raw, title_text, csv_filename, download_label
@@ -1633,7 +2573,10 @@ try:
                                     values=[f"<b>{h}</b>" for h in headers],
                                     fill_color="#0f172a",
                                     line_color="#334155",
-                                    align=["left" if h == "Cabang" else "center" for h in headers],
+                                    align=[
+                                        "left" if h == "Cabang" else "center"
+                                        for h in headers
+                                    ],
                                     font=dict(color="#f8fafc", size=13),
                                     height=34,
                                 ),
@@ -1641,7 +2584,10 @@ try:
                                     values=cell_values,
                                     fill_color=cell_colors,
                                     line_color="#334155",
-                                    align=["left" if h == "Cabang" else "center" for h in headers],
+                                    align=[
+                                        "left" if h == "Cabang" else "center"
+                                        for h in headers
+                                    ],
                                     font=dict(color=font_colors, size=12),
                                     height=30,
                                 ),
@@ -1669,7 +2615,7 @@ try:
                     )
 
                 with st.expander(
-                    "📊 2. Matrix Infografis UnRunsheet Per Cabang", expanded=True
+                    "📊 4. Matrix Infografis UnRunsheet Per Cabang", expanded=False
                 ):
                     df_unrun = run_query(
                         f"SELECT Cabang, aging_group, COUNT(DISTINCT AWB) AS total_awb FROM v_inbound {where_sql} AND Status_Shipment IN ('UnRunsheet', 'UnRunsheet with PRA') GROUP BY Cabang, aging_group"
@@ -1682,7 +2628,7 @@ try:
                     )
 
                 with st.expander(
-                    "📊 3. Matrix Infografis Success UnHRS Per Cabang", expanded=False
+                    "📊 5. Matrix Infografis Success UnHRS Per Cabang", expanded=False
                 ):
                     df_succ = run_query(
                         f"SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb FROM v_inbound {where_sql} {week_clause} AND Status_Shipment IN ('SUCCESS DELIVERY', 'SUCCESS RETURN SHIPPER') AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' GROUP BY Cabang, wus_aging_group"
@@ -1695,7 +2641,7 @@ try:
                     )
 
                 with st.expander(
-                    "📊 4. Matrix Infografis Undel UnHRS Per Cabang", expanded=False
+                    "📊 6. Matrix Infografis Undel UnHRS Per Cabang", expanded=False
                 ):
                     df_undel = run_query(
                         f"SELECT Cabang, wus_aging_group AS aging_group, COUNT(DISTINCT AWB) AS total_awb FROM v_inbound {where_sql} {week_clause} AND Status_Shipment = 'UNDELIVERY' AND (HRS = 'UnHRS' OR HRS = '-' OR HRS IS NULL) AND UPPER(COALESCE(RUNSHEET_NO, '')) LIKE '%MXG%' GROUP BY Cabang, wus_aging_group"
