@@ -1767,13 +1767,13 @@ try:
                         )
                         r3_c3.markdown(
                             build_hl_card_html(
-                                "YES Express", "H+0", calc_pct("yes_h0", "yes_tot"), 95.0
+                                "YES", "H+0", calc_pct("yes_h0", "yes_tot"), 95.0
                             ),
                             unsafe_allow_html=True,
                         )
                         r3_c4.markdown(
                             build_hl_card_html(
-                                "YES Express", "H+1", calc_pct("yes_h1", "yes_tot"), 99.0
+                                "YES", "H+1", calc_pct("yes_h1", "yes_tot"), 99.0
                             ),
                             unsafe_allow_html=True,
                         )
