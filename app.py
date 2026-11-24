@@ -1819,7 +1819,7 @@ try:
 
                     # ---------------------------------------------------------
                     # FUNGSI MATRIX & PROGRESS SUCCESS RATE LINE CHART
-                    # MENDUKUNG DRILLDOWN ZONA & KECAMATAN + DEFAULT 7 PERIODE TERAKHIR
+                    # DEFAULT 3 PERIODE TERAKHIR & BISA DIKOSONGKAN (ALL)
                     # BERLAKU UNTUK INBOUND (REG/JTR), CTC, DAN YES
                     # ---------------------------------------------------------
                     def render_running_total_sla_block(
@@ -1832,7 +1832,7 @@ try:
                         default_expanded=True,
                     ):
                         with st.expander(section_title, expanded=default_expanded):
-                            # Baris Kontrol 1: Parameter Periode + Multi-Select Periode Dinamis (Default 7 Terakhir)
+                            # Baris Kontrol 1: Parameter Periode + Multi-Select Periode Dinamis (Default 3 Terakhir, Bisa Dikosongkan = All)
                             col_p1, col_p2 = st.columns([1.3, 1.7])
                             with col_p1:
                                 period_granularity = st.radio(
@@ -1921,17 +1921,17 @@ try:
                                 p_label_sql = f"CONCAT(CAST(CAST(EXTRACT(DAY FROM {ts_expr}) AS INTEGER) AS STRING), ' - ', STRFTIME({ts_expr}, '%b'))"
                                 p_sort_sql = f"CAST({ts_expr} AS DATE)"
                                 period_col_header = "TANGGAL"
-                                msel_label = "🗓️ Pilih Tanggal (Default: 7 Hari Terakhir):"
+                                msel_label = "🗓️ Pilih Tanggal (Default: 3 Hari Terakhir | Kosongkan = All):"
                             elif period_granularity == "Week (Weekly)":
                                 p_label_sql = f"CONCAT('Week ', CAST(CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER) AS STRING))"
                                 p_sort_sql = f"CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER)"
                                 period_col_header = "WEEK of YEAR"
-                                msel_label = "🗓️ Pilih Week (Default: 7 Week Terakhir):"
+                                msel_label = "🗓️ Pilih Week (Default: 3 Week Terakhir | Kosongkan = All):"
                             else:
                                 p_label_sql = f"STRFTIME({ts_expr}, '%B')"
                                 p_sort_sql = f"STRFTIME({ts_expr}, '%Y-%m')"
                                 period_col_header = "MONTH"
-                                msel_label = "🗓️ Pilih Month (Default: 7 Month Terakhir):"
+                                msel_label = "🗓️ Pilih Month (Default: 3 Month Terakhir | Kosongkan = All):"
 
                             df_lt = run_query(
                                 f"""
@@ -1968,30 +1968,30 @@ try:
                                 .sort_values("sort_key")
                             )
                             period_opt_list = avail_periods_df["periode"].tolist()
-                            default_7_periods = (
-                                period_opt_list[-7:]
-                                if len(period_opt_list) > 7
+                            default_3_periods = (
+                                period_opt_list[-3:]
+                                if len(period_opt_list) > 3
                                 else period_opt_list
                             )
 
                             msel_key = f"msel_{block_key}_{period_granularity}"
-                            if msel_key in st.session_state:
+                            if msel_key not in st.session_state:
+                                st.session_state[msel_key] = default_3_periods
+                            elif len(st.session_state[msel_key]) > 0:
                                 valid_saved = [
                                     p
                                     for p in st.session_state[msel_key]
                                     if p in period_opt_list
                                 ]
-                                if not valid_saved and period_opt_list:
-                                    st.session_state[msel_key] = default_7_periods
-                                else:
-                                    st.session_state[msel_key] = valid_saved
+                                st.session_state[msel_key] = (
+                                    valid_saved if valid_saved else default_3_periods
+                                )
 
                             with col_p2:
                                 selected_periods = st.multiselect(
                                     msel_label,
                                     options=period_opt_list,
-                                    default=default_7_periods,
-                                    placeholder="Pilih satu atau beberapa periode (kosongkan = semua)",
+                                    placeholder="Semua Periode / All (Klik untuk pilih periode tertentu)",
                                     key=msel_key,
                                 )
 
