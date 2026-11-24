@@ -840,7 +840,7 @@ try:
                     render_kpi_card(
                         "🚨 Total UnRunsheet",
                         f"{total_unrunsheet:,}",
-                        f"Rasio Backlog: <b>{unrunsheet_rate:.2f}%</b> dari Total AWB",
+                        f"Rasio UnRunsheet: <b>{unrunsheet_rate:.2f}%</b> dari Total AWB",
                         accent_color="#dc3545" if total_unrunsheet > 0 else "#28a745",
                         pill_text="ACTION NEEDED",
                         progress_pct=min(unrunsheet_rate * 4, 100),
