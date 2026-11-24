@@ -1398,7 +1398,6 @@ try:
                     unsafe_allow_html=True,
                 )
 
-                # Gabungkan week dari POD maupun Last_Inbound agar seluruh Week muncul di filter
                 avail_weeks_df = run_query(
                     f"""
                     SELECT DISTINCT wk_num FROM (
@@ -1576,7 +1575,6 @@ try:
                         else hl_zona_opt.replace("Zona ", "")
                     )
 
-                    # Klausa Week terhubung ke dropdown "Pilih Minggu Analysis (Week)"
                     if selected_week_opt == "All Week":
                         hl_inb_week_sql = "1=1"
                         hl_ent_week_sql = "1=1"
@@ -1600,39 +1598,39 @@ try:
 
                     hl_query = f"""
                         SELECT
-                            -- REG Non COD (Filter Week berdasarkan Last_Inbound)
+                            -- REG Non COD
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {reg_cond} AND payment_type = 'Non COD' THEN AWB END) AS reg_ncod_tot,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS reg_ncod_h0,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_ncod_h1,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_ncod_h2,
 
-                            -- REG COD (Filter Week berdasarkan Last_Inbound)
+                            -- REG COD
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {reg_cond} AND payment_type = 'COD' THEN AWB END) AS reg_cod_tot,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_cod_h1,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_cod_h2,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS reg_cod_h3,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS reg_cod_h4,
 
-                            -- JTR (JTR & TRC) Non COD (Filter Week berdasarkan Last_Inbound)
+                            -- JTR (JTR & TRC) Non COD
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {jtr_cond} AND payment_type = 'Non COD' THEN AWB END) AS jtr_ncod_tot,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS jtr_ncod_h0,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_ncod_h1,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_ncod_h2,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_ncod_h3,
 
-                            -- JTR (JTR & TRC) COD (Filter Week berdasarkan Last_Inbound)
+                            -- JTR (JTR & TRC) COD
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {jtr_cond} AND payment_type = 'COD' THEN AWB END) AS jtr_cod_tot,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_cod_h1,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_cod_h2,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_cod_h3,
                             COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS jtr_cod_h4,
 
-                            -- CTC (Entry -> Delivered | Filter Week berdasarkan TGL_ENTRY)
+                            -- CTC (Entry -> Delivered)
                             COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {ctc_cond} THEN AWB END) AS ctc_tot,
                             COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS ctc_h0,
                             COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS ctc_h1,
 
-                            -- YES (Entry -> Delivered | Filter Week berdasarkan TGL_ENTRY)
+                            -- YES (Entry -> Delivered)
                             COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {yes_cond} THEN AWB END) AS yes_tot,
                             COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS yes_h0,
                             COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS yes_h1
@@ -1784,8 +1782,8 @@ try:
 
                     # ---------------------------------------------------------
                     # FUNGSI MATRIX & S-CURVE % RUNNING IN TOTAL
-                    # PEMBAGI: TOTAL AWB TRANSACTION YANG ADA LAST_INBOUND
-                    # PEMBILANG: KUMULATIF AWB SUCCESS DELIVERY PER H+
+                    # MENDUKUNG DRILLDOWN ZONA & KECAMATAN + MULTI-SELECT PERIODE
+                    # BERLAKU UNTUK INBOUND (REG/JTR), CTC, DAN YES
                     # ---------------------------------------------------------
                     def render_running_total_sla_block(
                         block_key,
@@ -1797,12 +1795,8 @@ try:
                         default_expanded=True,
                     ):
                         with st.expander(section_title, expanded=default_expanded):
-                            if mode == "INBOUND":
-                                col_p1, col_p2, col_p3 = st.columns([1.4, 1.1, 1.3])
-                            else:
-                                col_p1, col_p2 = st.columns([1.5, 2.3])
-                                col_p3 = None
-
+                            # Baris Kontrol 1: Parameter Periode + Multi-Select Periode Dinamis
+                            col_p1, col_p2 = st.columns([1.3, 1.7])
                             with col_p1:
                                 period_granularity = st.radio(
                                     "📅 Parameter Periode:",
@@ -1812,8 +1806,22 @@ try:
                                     key=f"gran_{block_key}",
                                 )
 
+                            # Baris Kontrol 2: Level Drilldown Zona & Kecamatan (+ Type Kiriman & Service untuk INBOUND)
                             if mode == "INBOUND":
-                                with col_p2:
+                                col_d1, col_d2, col_d3 = st.columns([1.45, 0.95, 1.1])
+                                with col_d1:
+                                    drilldown_mode = st.radio(
+                                        "🔎 Drilldown Zona & Kecamatan:",
+                                        [
+                                            "Periode ▸ Zona",
+                                            "Periode ▸ Zona ▸ Kecamatan",
+                                            "Destination (Cabang ▸ Zona ▸ Kecamatan)",
+                                        ],
+                                        index=0,
+                                        horizontal=True,
+                                        key=f"drill_{block_key}",
+                                    )
+                                with col_d2:
                                     pay_type_opt = st.radio(
                                         "💳 Type Kiriman:",
                                         ["Non COD", "COD", "All"],
@@ -1821,7 +1829,7 @@ try:
                                         horizontal=True,
                                         key=f"pay_{block_key}",
                                     )
-                                with col_p3:
+                                with col_d3:
                                     svc_rute_opt = st.radio(
                                         "🚚 Service (KPI Berbeda):",
                                         ["REG", "JTR (JTR & TRC)", "All"],
@@ -1830,6 +1838,17 @@ try:
                                         key=f"svc_{block_key}",
                                     )
                             else:
+                                drilldown_mode = st.radio(
+                                    "🔎 Drilldown Zona & Kecamatan:",
+                                    [
+                                        "Periode ▸ Zona",
+                                        "Periode ▸ Zona ▸ Kecamatan",
+                                        "Destination (Cabang ▸ Zona ▸ Kecamatan)",
+                                    ],
+                                    index=0,
+                                    horizontal=True,
+                                    key=f"drill_{block_key}",
+                                )
                                 pay_type_opt = "All"
                                 svc_rute_opt = "All"
 
@@ -1837,6 +1856,144 @@ try:
                                 "JTR" if svc_rute_opt == "JTR (JTR & TRC)" else "REG"
                             )
 
+                            extra_clauses = [
+                                "Type_Shipment = 'TRANSACTION'",
+                                "Last_Inbound IS NOT NULL AND Last_Inbound != '-'",
+                                "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') IS NOT NULL",
+                            ]
+                            if service_filter_sql:
+                                extra_clauses.append(service_filter_sql)
+                            if mode == "INBOUND":
+                                if pay_type_opt in ("Non COD", "COD"):
+                                    extra_clauses.append(
+                                        f"payment_type = '{pay_type_opt}'"
+                                    )
+                                if svc_rute_opt == "REG":
+                                    extra_clauses.append(
+                                        "UPPER(COALESCE(SERVICE, '')) LIKE '%REG%'"
+                                    )
+                                elif svc_rute_opt == "JTR (JTR & TRC)":
+                                    extra_clauses.append(
+                                        "(UPPER(COALESCE(SERVICE, '')) LIKE '%JTR%' OR UPPER(COALESCE(SERVICE, '')) LIKE '%TRC%')"
+                                    )
+
+                            extra_sql = " AND ".join(extra_clauses)
+                            ts_expr = f"TRY_STRPTIME({base_ts_col}, '%m/%d/%Y %H:%M')"
+
+                            # Format label periode sesuai permintaan:
+                            # Tanggal = 1 - Jan, 2 - Jan, dst.
+                            # Week = Week 1, Week 2, dst.
+                            # Month = January, February, March, dst.
+                            if period_granularity == "Tanggal (Daily)":
+                                p_label_sql = f"CONCAT(CAST(CAST(EXTRACT(DAY FROM {ts_expr}) AS INTEGER) AS STRING), ' - ', STRFTIME({ts_expr}, '%b'))"
+                                p_sort_sql = f"CAST({ts_expr} AS DATE)"
+                                period_col_header = "TANGGAL"
+                                msel_label = "🗓️ Pilih Tanggal (Multi-Select, contoh: 1 - Jan, 2 - Jan):"
+                            elif period_granularity == "Week (Weekly)":
+                                p_label_sql = f"CONCAT('Week ', CAST(CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER) AS STRING))"
+                                p_sort_sql = f"CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER)"
+                                period_col_header = "WEEK of YEAR"
+                                msel_label = "🗓️ Pilih Week (Multi-Select, contoh: Week 1, Week 2):"
+                            else:
+                                p_label_sql = f"STRFTIME({ts_expr}, '%B')"
+                                p_sort_sql = f"STRFTIME({ts_expr}, '%Y-%m')"
+                                period_col_header = "MONTH"
+                                msel_label = "🗓️ Pilih Month (Multi-Select, contoh: January, February):"
+
+                            df_lt = run_query(
+                                f"""
+                                SELECT 
+                                    {p_label_sql} AS periode,
+                                    {p_sort_sql} AS sort_key,
+                                    COALESCE(NULLIF(TRIM(Cabang), ''), 'Unknown') AS cabang_name,
+                                    UPPER(TRIM(COALESCE(Zona, 'UNKNOWN'))) AS zona_code,
+                                    COALESCE(NULLIF(TRIM(Kecamatan), ''), 'Unknown') AS kecamatan_name,
+                                    CASE 
+                                        WHEN Status_Shipment = 'SUCCESS DELIVERY' AND {bucket_col} IS NOT NULL THEN {bucket_col}
+                                        ELSE 'NOT_DELIVERED'
+                                    END AS lt_bucket,
+                                    COUNT(DISTINCT AWB) AS awb_cnt
+                                FROM v_inbound
+                                {where_sql}
+                                  AND {extra_sql}
+                                  AND {ts_expr} IS NOT NULL
+                                  AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C')
+                                GROUP BY 1, 2, 3, 4, 5, 6
+                                ORDER BY sort_key ASC, cabang_name ASC, zona_code ASC, kecamatan_name ASC
+                                """
+                            )
+
+                            if df_lt.empty:
+                                st.info(
+                                    "Tidak ada data kiriman `Type_Shipment = TRANSACTION` yang sudah `Last_Inbound` pada filter yang dipilih."
+                                )
+                                return
+
+                            # Populate opsi Multi-Select Periode secara dinamis & terurut kronologis
+                            avail_periods_df = (
+                                df_lt[["periode", "sort_key"]]
+                                .drop_duplicates()
+                                .sort_values("sort_key")
+                            )
+                            period_opt_list = avail_periods_df["periode"].tolist()
+
+                            with col_p2:
+                                selected_periods = st.multiselect(
+                                    msel_label,
+                                    options=period_opt_list,
+                                    default=[],
+                                    placeholder="Semua Periode (Klik untuk pilih satu atau beberapa)",
+                                    key=f"msel_{block_key}_{period_granularity}",
+                                )
+
+                            if selected_periods:
+                                df_lt = df_lt[df_lt["periode"].isin(selected_periods)]
+
+                            # Filter cepat opsional Zona & Kecamatan khusus saat drilldown Kecamatan aktif
+                            if "Kecamatan" in drilldown_mode:
+                                col_fz, col_fk = st.columns([1, 2])
+                                with col_fz:
+                                    avail_z_opts = [
+                                        z
+                                        for z in ["A", "B", "C"]
+                                        if z in df_lt["zona_code"].unique()
+                                    ]
+                                    sel_drill_zona = st.multiselect(
+                                        "⚡ Filter Zona (Drilldown):",
+                                        options=avail_z_opts,
+                                        default=[],
+                                        format_func=lambda z: f"Zona {z}",
+                                        placeholder="Semua Zona (A, B, C)",
+                                        key=f"dz_{block_key}",
+                                    )
+                                if sel_drill_zona:
+                                    df_lt = df_lt[
+                                        df_lt["zona_code"].isin(sel_drill_zona)
+                                    ]
+
+                                with col_fk:
+                                    avail_kec_opts = sorted(
+                                        df_lt["kecamatan_name"].unique().tolist()
+                                    )
+                                    sel_drill_kec = st.multiselect(
+                                        "📍 Filter Kecamatan (Drilldown):",
+                                        options=avail_kec_opts,
+                                        default=[],
+                                        placeholder="Semua Kecamatan (Klik untuk pilih beberapa)",
+                                        key=f"dk_{block_key}",
+                                    )
+                                if sel_drill_kec:
+                                    df_lt = df_lt[
+                                        df_lt["kecamatan_name"].isin(sel_drill_kec)
+                                    ]
+
+                            if df_lt.empty:
+                                st.info(
+                                    "Tidak ada data pada kombinasi filter periode / zona / kecamatan yang dipilih."
+                                )
+                                return
+
+                            # Kotak Referensi Target KPI & Rumus Pembagi
                             denom_note = (
                                 "<br><span style='color:#38bdf8;'>📐 <b>Rumus:</b> (Akumulasi AWB <code>SUCCESS DELIVERY</code> s/d H+ terkait) &divide; "
                                 "(Total AWB <code>Type_Shipment = TRANSACTION</code> yang sudah memiliki <code>Last_Inbound</code>)</span>"
@@ -1874,83 +2031,12 @@ try:
                                     + denom_note
                                 )
 
-                            if mode == "INBOUND":
-                                st.markdown(
-                                    f'<div class="kpi-ref-box">{kpi_info_html}</div>',
-                                    unsafe_allow_html=True,
-                                )
-                            else:
-                                with col_p2:
-                                    st.markdown(
-                                        f'<div class="kpi-ref-box">{kpi_info_html}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-
-                            extra_clauses = [
-                                "Type_Shipment = 'TRANSACTION'",
-                                "Last_Inbound IS NOT NULL AND Last_Inbound != '-'",
-                                "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') IS NOT NULL",
-                            ]
-                            if service_filter_sql:
-                                extra_clauses.append(service_filter_sql)
-                            if mode == "INBOUND":
-                                if pay_type_opt in ("Non COD", "COD"):
-                                    extra_clauses.append(
-                                        f"payment_type = '{pay_type_opt}'"
-                                    )
-                                if svc_rute_opt == "REG":
-                                    extra_clauses.append(
-                                        "UPPER(COALESCE(SERVICE, '')) LIKE '%REG%'"
-                                    )
-                                elif svc_rute_opt == "JTR (JTR & TRC)":
-                                    extra_clauses.append(
-                                        "(UPPER(COALESCE(SERVICE, '')) LIKE '%JTR%' OR UPPER(COALESCE(SERVICE, '')) LIKE '%TRC%')"
-                                    )
-
-                            extra_sql = " AND ".join(extra_clauses)
-                            ts_expr = f"TRY_STRPTIME({base_ts_col}, '%m/%d/%Y %H:%M')"
-
-                            if period_granularity == "Tanggal (Daily)":
-                                p_label_sql = f"STRFTIME({ts_expr}, '%d %b %Y')"
-                                p_sort_sql = f"CAST({ts_expr} AS DATE)"
-                                period_col_header = "TANGGAL"
-                            elif period_granularity == "Week (Weekly)":
-                                p_label_sql = f"CONCAT('Week ', CAST(CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER) AS STRING))"
-                                p_sort_sql = f"EXTRACT(WEEK FROM {ts_expr})"
-                                period_col_header = "WEEK of YEAR"
-                            else:
-                                p_label_sql = f"STRFTIME({ts_expr}, '%b %Y')"
-                                p_sort_sql = f"STRFTIME({ts_expr}, '%Y-%m')"
-                                period_col_header = "MONTH"
-
-                            df_lt = run_query(
-                                f"""
-                                SELECT 
-                                    {p_label_sql} AS periode,
-                                    {p_sort_sql} AS sort_key,
-                                    UPPER(TRIM(COALESCE(Zona, 'UNKNOWN'))) AS zona_code,
-                                    CASE 
-                                        WHEN Status_Shipment = 'SUCCESS DELIVERY' AND {bucket_col} IS NOT NULL THEN {bucket_col}
-                                        ELSE 'NOT_DELIVERED'
-                                    END AS lt_bucket,
-                                    COUNT(DISTINCT AWB) AS awb_cnt
-                                FROM v_inbound
-                                {where_sql}
-                                  AND {extra_sql}
-                                  AND {ts_expr} IS NOT NULL
-                                  AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C')
-                                GROUP BY 1, 2, 3, 4
-                                ORDER BY sort_key ASC, zona_code ASC
-                                """
+                            st.markdown(
+                                f'<div class="kpi-ref-box">{kpi_info_html}</div>',
+                                unsafe_allow_html=True,
                             )
 
-                            if df_lt.empty:
-                                st.info(
-                                    "Tidak ada data kiriman `Type_Shipment = TRANSACTION` yang sudah `Last_Inbound` pada filter yang dipilih."
-                                )
-                                return
-
-                            def compute_running_row(df_slice, label_txt, zona_ref, is_parent):
+                            def compute_running_row(df_slice, label_txt, zona_ref, row_level):
                                 total_vol = int(df_slice["awb_cnt"].sum())
                                 bucket_counts = (
                                     df_slice.groupby("lt_bucket")["awb_cnt"]
@@ -1961,7 +2047,7 @@ try:
                                 row_vals = {
                                     "Label": label_txt,
                                     "ZonaRef": zona_ref,
-                                    "IsParent": is_parent,
+                                    "RowLevel": row_level,
                                     "VolAWB": total_vol,
                                 }
                                 for b in LT_RUNNING_BUCKETS:
@@ -1980,37 +2066,126 @@ try:
                                 )
                                 return row_vals
 
-                            periods_df = (
-                                df_lt[["periode", "sort_key"]]
-                                .drop_duplicates()
-                                .sort_values("sort_key")
-                            )
-
                             matrix_rows = []
                             curve_rows = []
 
-                            for _, p_row in periods_df.iterrows():
-                                p_name = p_row["periode"]
-                                df_p = df_lt[df_lt["periode"] == p_name]
-
-                                parent_r = compute_running_row(
-                                    df_p, f"▪ {p_name}", "B", is_parent=True
+                            if drilldown_mode == "Periode ▸ Zona":
+                                first_col_header = period_col_header
+                                periods_df = (
+                                    df_lt[["periode", "sort_key"]]
+                                    .drop_duplicates()
+                                    .sort_values("sort_key")
                                 )
-                                matrix_rows.append(parent_r)
+                                for _, p_row in periods_df.iterrows():
+                                    p_name = p_row["periode"]
+                                    df_p = df_lt[df_lt["periode"] == p_name]
 
-                                for z_code in ["A", "B", "C"]:
-                                    df_pz = df_p[df_p["zona_code"] == z_code]
-                                    if not df_pz.empty:
-                                        child_r = compute_running_row(
-                                            df_pz,
-                                            f"    └ Zona {z_code}",
-                                            z_code,
-                                            is_parent=False,
+                                    matrix_rows.append(
+                                        compute_running_row(
+                                            df_p, f"▪ {p_name}", "B", row_level=0
                                         )
-                                        matrix_rows.append(child_r)
+                                    )
+                                    for z_code in ["A", "B", "C"]:
+                                        df_pz = df_p[df_p["zona_code"] == z_code]
+                                        if not df_pz.empty:
+                                            matrix_rows.append(
+                                                compute_running_row(
+                                                    df_pz,
+                                                    f"    └ Zona {z_code}",
+                                                    z_code,
+                                                    row_level=1,
+                                                )
+                                            )
+
+                            elif drilldown_mode == "Periode ▸ Zona ▸ Kecamatan":
+                                first_col_header = f"{period_col_header} / ZONA / KECAMATAN"
+                                periods_df = (
+                                    df_lt[["periode", "sort_key"]]
+                                    .drop_duplicates()
+                                    .sort_values("sort_key")
+                                )
+                                for _, p_row in periods_df.iterrows():
+                                    p_name = p_row["periode"]
+                                    df_p = df_lt[df_lt["periode"] == p_name]
+
+                                    matrix_rows.append(
+                                        compute_running_row(
+                                            df_p, f"▾ {p_name}", "B", row_level=0
+                                        )
+                                    )
+                                    for z_code in ["A", "B", "C"]:
+                                        df_pz = df_p[df_p["zona_code"] == z_code]
+                                        if not df_pz.empty:
+                                            matrix_rows.append(
+                                                compute_running_row(
+                                                    df_pz,
+                                                    f"  ▾ Zona {z_code}",
+                                                    z_code,
+                                                    row_level=1,
+                                                )
+                                            )
+                                            kec_list = sorted(
+                                                df_pz["kecamatan_name"].unique().tolist()
+                                            )
+                                            for kec_name in kec_list:
+                                                df_pzk = df_pz[
+                                                    df_pz["kecamatan_name"] == kec_name
+                                                ]
+                                                if not df_pzk.empty:
+                                                    matrix_rows.append(
+                                                        compute_running_row(
+                                                            df_pzk,
+                                                            f"      • {kec_name}",
+                                                            z_code,
+                                                            row_level=2,
+                                                        )
+                                                    )
+
+                            else:  # Destination (Cabang ▸ Zona ▸ Kecamatan) seperti Capture 2
+                                first_col_header = "DESTINATION"
+                                cabang_order_df = (
+                                    df_lt.groupby("cabang_name")["awb_cnt"]
+                                    .sum()
+                                    .reset_index()
+                                    .sort_values("awb_cnt", ascending=False)
+                                )
+                                for cab_name in cabang_order_df["cabang_name"].tolist():
+                                    df_c = df_lt[df_lt["cabang_name"] == cab_name]
+                                    matrix_rows.append(
+                                        compute_running_row(
+                                            df_c, f"▾ {cab_name}", "B", row_level=0
+                                        )
+                                    )
+                                    for z_code in ["A", "B", "C"]:
+                                        df_cz = df_c[df_c["zona_code"] == z_code]
+                                        if not df_cz.empty:
+                                            matrix_rows.append(
+                                                compute_running_row(
+                                                    df_cz,
+                                                    f"  ▾ Zona {z_code}",
+                                                    z_code,
+                                                    row_level=1,
+                                                )
+                                            )
+                                            kec_list = sorted(
+                                                df_cz["kecamatan_name"].unique().tolist()
+                                            )
+                                            for kec_name in kec_list:
+                                                df_czk = df_cz[
+                                                    df_cz["kecamatan_name"] == kec_name
+                                                ]
+                                                if not df_czk.empty:
+                                                    matrix_rows.append(
+                                                        compute_running_row(
+                                                            df_czk,
+                                                            f"      • {kec_name}",
+                                                            z_code,
+                                                            row_level=2,
+                                                        )
+                                                    )
 
                             gt_row = compute_running_row(
-                                df_lt, "TOTAL KESELURUHAN", "B", is_parent=True
+                                df_lt, "TOTAL KESELURUHAN", "B", row_level=0
                             )
                             matrix_rows.append(gt_row)
 
@@ -2018,7 +2193,7 @@ try:
                                 df_z_all = df_lt[df_lt["zona_code"] == z_code]
                                 if not df_z_all.empty:
                                     z_summary = compute_running_row(
-                                        df_z_all, f"Zona {z_code}", z_code, False
+                                        df_z_all, f"Zona {z_code}", z_code, 1
                                     )
                                     for b in LT_RUNNING_BUCKETS:
                                         curve_rows.append(
@@ -2043,7 +2218,7 @@ try:
 
                             vol_col_header = "Vol Inbound"
                             table_headers = (
-                                [period_col_header, vol_col_header]
+                                [first_col_header, vol_col_header]
                                 + LT_RUNNING_BUCKETS
                                 + ["Total"]
                             )
@@ -2051,51 +2226,63 @@ try:
                             cell_fills = []
                             cell_fonts = []
 
+                            has_kec_level = "Kecamatan" in drilldown_mode
+
                             for col_name in table_headers:
                                 col_txt_list = []
                                 col_fill_list = []
                                 col_font_list = []
 
                                 for r_idx, r_data in df_matrix_disp.iterrows():
-                                    is_parent = bool(r_data["IsParent"])
+                                    r_lvl = int(r_data["RowLevel"])
                                     is_grand_total = (
                                         r_idx == len(df_matrix_disp) - 1
                                     )
+                                    is_bold_row = (r_lvl == 0) or (
+                                        r_lvl == 1 and has_kec_level
+                                    )
                                     z_ref = r_data["ZonaRef"]
 
-                                    if col_name == period_col_header:
+                                    if col_name == first_col_header:
                                         col_txt_list.append(
                                             f"<b>{r_data['Label']}</b>"
-                                            if is_parent
+                                            if is_bold_row
                                             else r_data["Label"]
                                         )
-                                        col_fill_list.append(
-                                            "#0f172a"
-                                            if is_grand_total
-                                            else ("#1e3a5f" if is_parent else "#1e293b")
-                                        )
-                                        col_font_list.append(
-                                            "#38bdf8" if is_grand_total else "#f8fafc"
-                                        )
+                                        if is_grand_total:
+                                            col_fill_list.append("#0f172a")
+                                            col_font_list.append("#38bdf8")
+                                        elif r_lvl == 0:
+                                            col_fill_list.append("#1e3a5f")
+                                            col_font_list.append("#f8fafc")
+                                        elif r_lvl == 1 and has_kec_level:
+                                            col_fill_list.append("#172554")
+                                            col_font_list.append("#93c5fd")
+                                        else:
+                                            col_fill_list.append("#1e293b")
+                                            col_font_list.append("#e2e8f0")
                                     elif col_name == vol_col_header:
                                         vol_str = f"{int(r_data['VolAWB']):,}"
                                         col_txt_list.append(
                                             f"<b>{vol_str}</b>"
-                                            if is_parent
+                                            if is_bold_row
                                             else vol_str
                                         )
-                                        col_fill_list.append(
-                                            "#0f172a"
-                                            if is_grand_total
-                                            else ("#1e3a5f" if is_parent else "#1e293b")
-                                        )
+                                        if is_grand_total:
+                                            col_fill_list.append("#0f172a")
+                                        elif r_lvl == 0:
+                                            col_fill_list.append("#1e3a5f")
+                                        elif r_lvl == 1 and has_kec_level:
+                                            col_fill_list.append("#172554")
+                                        else:
+                                            col_fill_list.append("#1e293b")
                                         col_font_list.append("#cbd5e1")
                                     else:
                                         val_num = float(r_data[col_name])
                                         pct_str = f"{val_num:.2f}%"
                                         col_txt_list.append(
                                             f"<b>{pct_str}</b>"
-                                            if is_parent
+                                            if is_bold_row
                                             else pct_str
                                         )
                                         targets_map = get_kpi_targets_for_row(
@@ -2105,7 +2292,7 @@ try:
                                             val_num,
                                             col_name,
                                             targets_map,
-                                            is_parent_row=is_parent,
+                                            is_parent_row=is_bold_row,
                                         )
                                         col_fill_list.append(bg_c)
                                         col_font_list.append(fg_c)
@@ -2114,8 +2301,9 @@ try:
                                 cell_fills.append(col_fill_list)
                                 cell_fonts.append(col_font_list)
 
+                            first_col_w = 1.75 if has_kec_level else 1.45
                             col_widths = (
-                                [1.45, 0.90]
+                                [first_col_w, 0.90]
                                 + [1.05, 1.05, 1.05]
                                 + [0.72] * 8
                                 + [0.80]
@@ -2132,7 +2320,7 @@ try:
                                             line_color="#334155",
                                             align=[
                                                 "left"
-                                                if h == period_col_header
+                                                if h == first_col_header
                                                 else "center"
                                                 for h in table_headers
                                             ],
@@ -2145,7 +2333,7 @@ try:
                                             line_color="#334155",
                                             align=[
                                                 "left"
-                                                if h == period_col_header
+                                                if h == first_col_header
                                                 else "center"
                                                 for h in table_headers
                                             ],
@@ -2155,12 +2343,14 @@ try:
                                     )
                                 ]
                             )
+                            max_tbl_h = 820 if has_kec_level else 620
                             fig_lt_table.update_layout(
                                 margin=dict(l=2, r=2, t=8, b=8),
                                 paper_bgcolor="rgba(0,0,0,0)",
                                 plot_bgcolor="rgba(0,0,0,0)",
                                 height=min(
-                                    620, max(250, (len(df_matrix_disp) + 1) * 30 + 35)
+                                    max_tbl_h,
+                                    max(250, (len(df_matrix_disp) + 1) * 30 + 35),
                                 ),
                             )
                             st.plotly_chart(fig_lt_table, use_container_width=True)
@@ -2248,10 +2438,10 @@ try:
                                 st.plotly_chart(fig_curve, use_container_width=True)
 
                             export_df = df_matrix_disp.drop(
-                                columns=["ZonaRef", "IsParent"]
+                                columns=["ZonaRef", "RowLevel"]
                             ).rename(
                                 columns={
-                                    "Label": period_col_header,
+                                    "Label": first_col_header,
                                     "VolAWB": "Vol_Inbound_TRX",
                                 }
                             )
