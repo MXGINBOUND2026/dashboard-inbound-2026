@@ -1398,8 +1398,16 @@ try:
                     unsafe_allow_html=True,
                 )
 
+                # Gabungkan week dari POD maupun Last_Inbound agar seluruh Week muncul di filter
                 avail_weeks_df = run_query(
-                    f"SELECT DISTINCT pod_week_num as wk_num FROM v_inbound {where_sql} AND pod_week_num IS NOT NULL ORDER BY wk_num DESC"
+                    f"""
+                    SELECT DISTINCT wk_num FROM (
+                        SELECT pod_week_num AS wk_num FROM v_inbound {where_sql} AND pod_week_num IS NOT NULL
+                        UNION
+                        SELECT CAST(EXTRACT(WEEK FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) AS INTEGER) AS wk_num
+                        FROM v_inbound {where_sql} AND TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') IS NOT NULL
+                    ) t WHERE wk_num IS NOT NULL ORDER BY wk_num DESC
+                    """
                 )
                 week_list = (
                     avail_weeks_df["wk_num"].dropna().astype(int).tolist()
@@ -1414,6 +1422,9 @@ try:
                         "📅 Pilih Minggu Analysis (Week):",
                         options=week_options,
                         index=0,
+                        format_func=lambda x: "All Week"
+                        if x == "All Week"
+                        else f"Week {x}",
                         key="exec_selected_week",
                     )
 
@@ -1519,10 +1530,15 @@ try:
 
                 # =========================================================
                 # GRAFIK SLA LEAD TIME (% RUNNING IN TOTAL) + KPI HIGHLIGHTS
-                # PEMBAGI: TOTAL AWB TRANSACTION YANG ADA LAST_INBOUND
+                # TERKONEKSI DENGAN PILIH MINGGU ANALYSIS (WEEK)
                 # =========================================================
+                active_wk_label = (
+                    "All Week"
+                    if selected_week_opt == "All Week"
+                    else f"Week {int(selected_week_opt)}"
+                )
                 st.markdown(
-                    '<div class="section-banner">🎯 Lead Time SLA Delivery (% Running in Total vs Target KPI — Pembagi: Total Inbound TRANSACTION)</div>',
+                    f'<div class="section-banner">🎯 Lead Time SLA Delivery (% Running in Total vs Target KPI — Periode: {active_wk_label})</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -1533,12 +1549,12 @@ try:
                 else:
                     # ---------------------------------------------------------
                     # KPI HIGHLIGHT CARDS PER SERVICE (REG vs JTR vs CTC vs YES)
-                    # TANPA ZONA D
+                    # TERKONEKSI DENGAN FILTER WEEK & ACUAN ZONA (TANPA ZONA D)
                     # ---------------------------------------------------------
                     col_hl_title, col_hl_zona = st.columns([2.1, 1.3])
                     with col_hl_title:
                         st.markdown(
-                            "#### 🏆 Highlight Capaian KPI Lead Time (% Success dari Total Inbound TRANSACTION)"
+                            f"#### 🏆 Highlight Capaian KPI Lead Time — `{active_wk_label}`"
                         )
                     with col_hl_zona:
                         hl_zona_opt = st.radio(
@@ -1560,6 +1576,15 @@ try:
                         else hl_zona_opt.replace("Zona ", "")
                     )
 
+                    # Klausa Week terhubung ke dropdown "Pilih Minggu Analysis (Week)"
+                    if selected_week_opt == "All Week":
+                        hl_inb_week_sql = "1=1"
+                        hl_ent_week_sql = "1=1"
+                    else:
+                        wk_int = int(selected_week_opt)
+                        hl_inb_week_sql = f"EXTRACT(WEEK FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = {wk_int}"
+                        hl_ent_week_sql = f"EXTRACT(WEEK FROM TRY_STRPTIME(TGL_ENTRY, '%m/%d/%Y %H:%M')) = {wk_int}"
+
                     h0_in_sql = "'H+0 jam 00:00-12:00', 'H+0 jam 12:01-17:00', 'H+0 jam 17:01-23:59'"
                     h1_in_sql = f"{h0_in_sql}, 'H+1'"
                     h2_in_sql = f"{h1_in_sql}, 'H+2'"
@@ -1571,45 +1596,46 @@ try:
                     ctc_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%CTC%'"
                     yes_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%YES%'"
                     succ_cond = "Status_Shipment = 'SUCCESS DELIVERY'"
+                    ent_valid_sql = "TRY_STRPTIME(TGL_ENTRY, '%m/%d/%Y %H:%M') IS NOT NULL"
 
                     hl_query = f"""
                         SELECT
-                            -- REG Non COD
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' THEN AWB END) AS reg_ncod_tot,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS reg_ncod_h0,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_ncod_h1,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_ncod_h2,
+                            -- REG Non COD (Filter Week berdasarkan Last_Inbound)
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {reg_cond} AND payment_type = 'Non COD' THEN AWB END) AS reg_ncod_tot,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS reg_ncod_h0,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_ncod_h1,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_ncod_h2,
 
-                            -- REG COD
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' THEN AWB END) AS reg_cod_tot,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_cod_h1,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_cod_h2,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS reg_cod_h3,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS reg_cod_h4,
+                            -- REG COD (Filter Week berdasarkan Last_Inbound)
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {reg_cond} AND payment_type = 'COD' THEN AWB END) AS reg_cod_tot,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_cod_h1,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_cod_h2,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS reg_cod_h3,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS reg_cod_h4,
 
-                            -- JTR (JTR & TRC) Non COD
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' THEN AWB END) AS jtr_ncod_tot,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS jtr_ncod_h0,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_ncod_h1,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_ncod_h2,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_ncod_h3,
+                            -- JTR (JTR & TRC) Non COD (Filter Week berdasarkan Last_Inbound)
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {jtr_cond} AND payment_type = 'Non COD' THEN AWB END) AS jtr_ncod_tot,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS jtr_ncod_h0,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_ncod_h1,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_ncod_h2,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_ncod_h3,
 
-                            -- JTR (JTR & TRC) COD
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' THEN AWB END) AS jtr_cod_tot,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_cod_h1,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_cod_h2,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_cod_h3,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS jtr_cod_h4,
+                            -- JTR (JTR & TRC) COD (Filter Week berdasarkan Last_Inbound)
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {jtr_cond} AND payment_type = 'COD' THEN AWB END) AS jtr_cod_tot,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_cod_h1,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_cod_h2,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_cod_h3,
+                            COUNT(DISTINCT CASE WHEN {hl_inb_week_sql} AND {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS jtr_cod_h4,
 
-                            -- CTC (Entry -> Delivered | Pembagi: Total Inbound TRANSACTION)
-                            COUNT(DISTINCT CASE WHEN {ctc_cond} THEN AWB END) AS ctc_tot,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS ctc_h0,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS ctc_h1,
+                            -- CTC (Entry -> Delivered | Filter Week berdasarkan TGL_ENTRY)
+                            COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {ctc_cond} THEN AWB END) AS ctc_tot,
+                            COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS ctc_h0,
+                            COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS ctc_h1,
 
-                            -- YES (Entry -> Delivered | Pembagi: Total Inbound TRANSACTION)
-                            COUNT(DISTINCT CASE WHEN {yes_cond} THEN AWB END) AS yes_tot,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS yes_h0,
-                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS yes_h1
+                            -- YES (Entry -> Delivered | Filter Week berdasarkan TGL_ENTRY)
+                            COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {yes_cond} THEN AWB END) AS yes_tot,
+                            COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS yes_h0,
+                            COUNT(DISTINCT CASE WHEN {hl_ent_week_sql} AND {ent_valid_sql} AND {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS yes_h1
                         FROM v_inbound
                         {where_sql}
                           AND Type_Shipment = 'TRANSACTION'
@@ -1811,7 +1837,6 @@ try:
                                 "JTR" if svc_rute_opt == "JTR (JTR & TRC)" else "REG"
                             )
 
-                            # Kotak Referensi Target KPI & Rumus Pembagi (Tanpa Zona D)
                             denom_note = (
                                 "<br><span style='color:#38bdf8;'>📐 <b>Rumus:</b> (Akumulasi AWB <code>SUCCESS DELIVERY</code> s/d H+ terkait) &divide; "
                                 "(Total AWB <code>Type_Shipment = TRANSACTION</code> yang sudah memiliki <code>Last_Inbound</code>)</span>"
