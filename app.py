@@ -750,7 +750,7 @@ try:
 
             st.markdown(
                 f'<div class="marquee-container-tab1">'
-                f'<div class="marquee-text-tab1">🔥 TOP 5 BOTTLENECK UNRUNSHEET: &nbsp;&nbsp;{top_kecamatan_str}</div>'
+                f'<div class="marquee-text-tab1">🔥 TOP 5 UNRUNSHEET: &nbsp;&nbsp;{top_kecamatan_str}</div>'
                 f"</div>",
                 unsafe_allow_html=True,
             )
