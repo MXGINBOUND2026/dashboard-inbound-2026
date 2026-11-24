@@ -340,14 +340,16 @@ def render_kpi_card(
     pill_text=None,
     progress_pct=None,
     value_color="#f8fafc",
+    pill_color=None,
 ):
     pct_clamped = (
         max(0.0, min(100.0, float(progress_pct)))
         if progress_pct is not None
         else 0.0
     )
+    p_text_color = pill_color if pill_color else accent_color
     pill_html = (
-        f'<span class="kpi-pill" style="background:{accent_color}22; color:{accent_color}; border:1px solid {accent_color}66;">{pill_text}</span>'
+        f'<span class="kpi-pill" style="background:{accent_color}22; color:{p_text_color}; border:1px solid {accent_color}66;">{pill_text}</span>'
         if pill_text
         else ""
     )
@@ -1684,13 +1686,24 @@ try:
 
                         def build_hl_card_html(card_title, milestone_lbl, pct_vol_tuple, target_val):
                             actual_val, vol_cnt = pct_vol_tuple
+                            if vol_cnt == 0:
+                                return render_kpi_card(
+                                    title=f"{card_title} ({milestone_lbl})",
+                                    value_str="No Shipment",
+                                    sub_str=f"Target: <b>{target_val:.0f}%</b> &nbsp;|&nbsp; Inbound Shipment: <b>0</b> AWB",
+                                    accent_color="#64748b",
+                                    pill_text="No Shipment",
+                                    progress_pct=0.0,
+                                    value_color="#94a3b8",
+                                    pill_color="#94a3b8",
+                                )
                             accent_c, pill_txt, val_c = get_kpi_status_visual(
                                 actual_val, target_val
                             )
                             return render_kpi_card(
                                 title=f"{card_title} ({milestone_lbl})",
                                 value_str=f"{actual_val:.2f}%",
-                                sub_str=f"Target: <b>{target_val:.0f}%</b> &nbsp;|&nbsp; Inbound TRX: <b>{vol_cnt:,}</b> AWB",
+                                sub_str=f"Target: <b>{target_val:.0f}%</b> &nbsp;|&nbsp; Inbound Shipment: <b>{vol_cnt:,}</b> AWB",
                                 accent_color=accent_c,
                                 pill_text=pill_txt,
                                 progress_pct=actual_val,
@@ -1767,13 +1780,13 @@ try:
                         )
                         r3_c3.markdown(
                             build_hl_card_html(
-                                "YES", "H+0", calc_pct("yes_h0", "yes_tot"), 95.0
+                                "YES Express", "H+0", calc_pct("yes_h0", "yes_tot"), 95.0
                             ),
                             unsafe_allow_html=True,
                         )
                         r3_c4.markdown(
                             build_hl_card_html(
-                                "YES", "H+1", calc_pct("yes_h1", "yes_tot"), 99.0
+                                "YES Express", "H+1", calc_pct("yes_h1", "yes_tot"), 99.0
                             ),
                             unsafe_allow_html=True,
                         )
@@ -1880,7 +1893,7 @@ try:
                             extra_sql = " AND ".join(extra_clauses)
                             ts_expr = f"TRY_STRPTIME({base_ts_col}, '%m/%d/%Y %H:%M')"
 
-                            # Format label periode sesuai permintaan:
+                            # Format label periode:
                             # Tanggal = 1 - Jan, 2 - Jan, dst.
                             # Week = Week 1, Week 2, dst.
                             # Month = January, February, March, dst.
@@ -1929,7 +1942,6 @@ try:
                                 )
                                 return
 
-                            # Populate opsi Multi-Select Periode secara dinamis & terurut kronologis
                             avail_periods_df = (
                                 df_lt[["periode", "sort_key"]]
                                 .drop_duplicates()
@@ -1949,7 +1961,6 @@ try:
                             if selected_periods:
                                 df_lt = df_lt[df_lt["periode"].isin(selected_periods)]
 
-                            # Filter cepat opsional Zona & Kecamatan khusus saat drilldown Kecamatan aktif
                             if "Kecamatan" in drilldown_mode:
                                 col_fz, col_fk = st.columns([1, 2])
                                 with col_fz:
@@ -1993,7 +2004,6 @@ try:
                                 )
                                 return
 
-                            # Kotak Referensi Target KPI & Rumus Pembagi
                             denom_note = (
                                 "<br><span style='color:#38bdf8;'>📐 <b>Rumus:</b> (Akumulasi AWB <code>SUCCESS DELIVERY</code> s/d H+ terkait) &divide; "
                                 "(Total AWB <code>Type_Shipment = TRANSACTION</code> yang sudah memiliki <code>Last_Inbound</code>)</span>"
@@ -2141,7 +2151,7 @@ try:
                                                         )
                                                     )
 
-                            else:  # Destination (Cabang ▸ Zona ▸ Kecamatan) seperti Capture 2
+                            else:
                                 first_col_header = "DESTINATION"
                                 cabang_order_df = (
                                     df_lt.groupby("cabang_name")["awb_cnt"]
@@ -2407,7 +2417,7 @@ try:
                                 )
                                 fig_curve.update_layout(
                                     title=dict(
-                                        text="<b>📈 Kurva Kumulatif % Success Delivery per Zona (Pembagi: Total Inbound TRX)</b>",
+                                        text="<b>📈 Kurva Kumulatif % Success Delivery per Zona (Pembagi: Total Inbound Shipment)</b>",
                                         x=0,
                                         font=dict(size=14, color="#f8fafc"),
                                     ),
@@ -2442,7 +2452,7 @@ try:
                             ).rename(
                                 columns={
                                     "Label": first_col_header,
-                                    "VolAWB": "Vol_Inbound_TRX",
+                                    "VolAWB": "Vol_Inbound_Shipment",
                                 }
                             )
                             st.download_button(
