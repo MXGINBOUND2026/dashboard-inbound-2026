@@ -110,6 +110,50 @@ def download_specific_file(service, folder_id, file_name, local_path):
         return False
 
 
+def build_ts_parse_sql(col_name, alias_name):
+    return f"""
+        COALESCE(
+            TRY_STRPTIME({col_name}, '%m/%d/%Y %I:%M:%S %p'),
+            TRY_STRPTIME({col_name}, '%m/%d/%Y %I:%M %p'),
+            TRY_STRPTIME({col_name}, '%m/%d/%Y %H:%M:%S'),
+            TRY_STRPTIME({col_name}, '%m/%d/%Y %H:%M'),
+            TRY_STRPTIME({col_name}, '%d/%m/%Y %I:%M:%S %p'),
+            TRY_STRPTIME({col_name}, '%d/%m/%Y %I:%M %p'),
+            TRY_STRPTIME({col_name}, '%d/%m/%Y %H:%M:%S'),
+            TRY_STRPTIME({col_name}, '%d/%m/%Y %H:%M'),
+            TRY_STRPTIME({col_name}, '%d-%b-%Y %H:%M:%S'),
+            TRY_STRPTIME({col_name}, '%d-%b-%Y %H:%M'),
+            TRY_CAST({col_name} AS TIMESTAMP)
+        ) AS {alias_name}
+    """
+
+
+def build_leadtime_bucket_sql(start_col, end_col, alias_name):
+    return f"""
+        CASE
+            WHEN {start_col} IS NULL OR {end_col} IS NULL THEN NULL
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) <= 0 THEN
+                CASE
+                    WHEN EXTRACT(HOUR FROM {start_col}) < 12
+                         OR (EXTRACT(HOUR FROM {start_col}) = 12 AND EXTRACT(MINUTE FROM {start_col}) = 0 AND EXTRACT(SECOND FROM {start_col}) = 0)
+                    THEN 'H+0 jam 00:00-12:00'
+                    WHEN EXTRACT(HOUR FROM {start_col}) < 17
+                         OR (EXTRACT(HOUR FROM {start_col}) = 17 AND EXTRACT(MINUTE FROM {start_col}) = 0 AND EXTRACT(SECOND FROM {start_col}) = 0)
+                    THEN 'H+0 jam 12:01-17:00'
+                    ELSE 'H+0 jam 17:01-23:59'
+                END
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 1 THEN 'H+1'
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 2 THEN 'H+2'
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 3 THEN 'H+3'
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 4 THEN 'H+4'
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 5 THEN 'H+5'
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 6 THEN 'H+6'
+            WHEN DATEDIFF('day', CAST({start_col} AS DATE), CAST({end_col} AS DATE)) = 7 THEN 'H+7'
+            ELSE '>H+7'
+        END AS {alias_name}
+    """
+
+
 print("1. Menghubungkan ke Google Drive API...")
 service = get_drive_service()
 
@@ -193,143 +237,24 @@ query_duckdb = f"""
                 main.MTI_USER, main.MANIFEST_TRANSIT_SUBAGEN_NO, main.MANIFEST_TRANSIT_SUBAGEN_DATE, main.MTS_USER,
                 main.TRANSIT_MANIFEST, main.TRANSIT_MANIFEST_DATE, main.TRANSIT_MANIFEST_USER, main.RECEIVING_DATE,
                 main.OUTBOUND_MANIFEST_DATE, main.TGL_RECEIVED, main.TGL_TARIK_REPORT, main.TGL_UPDATE_STATUS_POD,
-                main.WUS_DATE, main.BILNOTE_AMOUNT, main.RUNSHEET_COURIER_NAME,
+                main.TGL_ENTRY, main.WUS_DATE, main.BILNOTE_AMOUNT, main.RUNSHEET_COURIER_NAME,
                 ref.POD_Category AS raw_pod_category, ref.POD_DESC, ref.CEK_STATUS
             FROM read_csv_auto('{csv_pattern}', ignore_errors=true, union_by_name=true) AS main
             LEFT JOIN df_coding_ref AS ref ON CAST(main.CODING AS VARCHAR) = CAST(ref.CODE AS VARCHAR)
         ),
         parsed AS (
             SELECT *,
-                COALESCE(
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(INBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(INBOUND_MANIFEST_DATE AS TIMESTAMP)
-                ) AS dt_im,
-                COALESCE(
-                    TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(HVO_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(HVO_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(HVO_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(HVO_DATE AS TIMESTAMP)
-                ) AS dt_hvo,
-                COALESCE(
-                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(HVI_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(HVI_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(HVI_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(HVI_DATE AS TIMESTAMP)
-                ) AS dt_hvi,
-                COALESCE(
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(MANIFEST_INBOUND_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(MANIFEST_INBOUND_SUBAGEN_DATE AS TIMESTAMP)
-                ) AS dt_mti,
-                COALESCE(
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(MANIFEST_TRANSIT_SUBAGEN_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(MANIFEST_TRANSIT_SUBAGEN_DATE AS TIMESTAMP)
-                ) AS dt_mts,
-                COALESCE(
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(TRANSIT_MANIFEST_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(TRANSIT_MANIFEST_DATE AS TIMESTAMP)
-                ) AS dt_tm,
-                COALESCE(
-                    TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(DATE_RUNSHEET, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(DATE_RUNSHEET, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(DATE_RUNSHEET, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(DATE_RUNSHEET AS TIMESTAMP)
-                ) AS dt_run,
-                COALESCE(
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(OUTBOUND_MANIFEST_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(OUTBOUND_MANIFEST_DATE AS TIMESTAMP)
-                ) AS dt_ob,
-                COALESCE(
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(TGL_UPDATE_STATUS_POD, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(TGL_UPDATE_STATUS_POD AS TIMESTAMP)
-                ) AS dt_update_pod,
-                COALESCE(
-                    TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %I:%M %p'),
-                    TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(WUS_DATE, '%m/%d/%Y %H:%M'), 
-                    TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %I:%M:%S %p'),
-                    TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %I:%M %p'),
-                    TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %H:%M:%S'), 
-                    TRY_STRPTIME(WUS_DATE, '%d/%m/%Y %H:%M'), 
-                    TRY_STRPTIME(WUS_DATE, '%d-%b-%Y %H:%M:%S'), 
-                    TRY_STRPTIME(WUS_DATE, '%d-%b-%Y %H:%M'), 
-                    TRY_CAST(WUS_DATE AS TIMESTAMP)
-                ) AS dt_wus,
+                {build_ts_parse_sql('INBOUND_MANIFEST_DATE', 'dt_im')},
+                {build_ts_parse_sql('HVO_DATE', 'dt_hvo')},
+                {build_ts_parse_sql('HVI_DATE', 'dt_hvi')},
+                {build_ts_parse_sql('MANIFEST_INBOUND_SUBAGEN_DATE', 'dt_mti')},
+                {build_ts_parse_sql('MANIFEST_TRANSIT_SUBAGEN_DATE', 'dt_mts')},
+                {build_ts_parse_sql('TRANSIT_MANIFEST_DATE', 'dt_tm')},
+                {build_ts_parse_sql('DATE_RUNSHEET', 'dt_run')},
+                {build_ts_parse_sql('OUTBOUND_MANIFEST_DATE', 'dt_ob')},
+                {build_ts_parse_sql('TGL_UPDATE_STATUS_POD', 'dt_update_pod')},
+                {build_ts_parse_sql('TGL_ENTRY', 'dt_entry')},
+                {build_ts_parse_sql('WUS_DATE', 'dt_wus')},
                 CASE 
                     WHEN (CONNOTE_RETURN_RT IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RT AS VARCHAR)) != '' AND CONNOTE_RETURN_RT != '-') 
                          OR (CONNOTE_RETURN_RF IS NOT NULL AND TRIM(CAST(CONNOTE_RETURN_RF AS VARCHAR)) != '' AND CONNOTE_RETURN_RF != '-')
@@ -374,6 +299,13 @@ query_duckdb = f"""
                     WHEN valid_inbound_date = dt_tm AND UPPER(COALESCE(TRANSIT_MANIFEST, '')) LIKE '%MXG%' THEN TM_LOCATION
                     ELSE NULL
                 END AS LAST_LOCATION,
+                CASE
+                    WHEN LEFT(LTRIM(UPPER(TRIM(COALESCE(CAST(c.AWB AS VARCHAR), ''))), ''''), 3) = 'RTN' THEN 'TRANSACTION'
+                    WHEN LEFT(LTRIM(UPPER(TRIM(COALESCE(CAST(c.AWB AS VARCHAR), ''))), ''''), 2) IN ('RT', 'RF') THEN 'RETURN'
+                    WHEN LEFT(LTRIM(UPPER(TRIM(COALESCE(CAST(c.AWB AS VARCHAR), ''))), ''''), 2) = 'FW' THEN 'FORWARD'
+                    WHEN LEFT(LTRIM(UPPER(TRIM(COALESCE(CAST(c.AWB AS VARCHAR), ''))), ''''), 4) = '8000' THEN 'DUMMY'
+                    ELSE 'TRANSACTION'
+                END AS Type_Shipment,
                 CASE 
                     WHEN UPPER(TRIM(CAST(AWB_CANCEL AS VARCHAR))) = 'Y' THEN 'AWB Cancel'
                     WHEN POD_Category IS NOT NULL AND TRIM(CAST(POD_Category AS VARCHAR)) != '' AND POD_Category != '-' THEN POD_Category
@@ -409,6 +341,7 @@ query_duckdb = f"""
         )
         SELECT 
             COALESCE(w.AWB, '-') AS AWB,
+            w.Type_Shipment AS Type_Shipment,
             COALESCE(w.SERVICE, '-') AS SERVICE,
             CASE 
                 WHEN w.CODING IS NULL OR CAST(w.CODING AS VARCHAR) = '' OR CAST(w.CODING AS VARCHAR) = '-' THEN '-'
@@ -417,6 +350,7 @@ query_duckdb = f"""
                 ELSE CAST(w.CODING AS VARCHAR)
             END AS CODING,
             COALESCE(w.WUS_REMARKS, '-') AS WUS_REMARKS,
+            COALESCE(STRFTIME(w.dt_entry, '%m/%d/%Y %H:%M'), '-') AS TGL_ENTRY,
             COALESCE(STRFTIME(w.valid_inbound_date, '%m/%d/%Y %H:%M'), '-') AS Last_Inbound,
             COALESCE(STRFTIME(w.dt_update_pod, '%m/%d/%Y %H:%M'), '-') AS TGL_UPDATE_STATUS_POD,
             COALESCE(STRFTIME(w.dt_wus, '%m/%d/%Y %H:%M'), '-') AS WUS_DATE,
@@ -513,6 +447,8 @@ query_duckdb = f"""
                     END
                 ELSE '-'
             END AS hrs_aging_group,
+            {build_leadtime_bucket_sql('w.valid_inbound_date', 'w.dt_update_pod', 'lt_inbound_bucket')},
+            {build_leadtime_bucket_sql('w.dt_entry', 'w.dt_update_pod', 'lt_entry_bucket')},
             CASE WHEN w.dt_update_pod IS NOT NULL THEN EXTRACT(WEEK FROM w.dt_update_pod) ELSE NULL END AS pod_week_num,
             w.TGL_TARIK_REPORT
         FROM processed w
