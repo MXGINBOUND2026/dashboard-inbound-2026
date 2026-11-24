@@ -211,7 +211,8 @@ H0_BUCKETS = [
 ]
 
 # =========================================================
-# KONFIGURASI TARGET KPI TERPUSAT (REG vs JTR/TRC vs CTC/YES)
+# KONFIGURASI TARGET KPI TERPUSAT (SESUAI TABEL STANDAR KPI)
+# Hanya Zona A, B, dan C (Tanpa Zona D)
 # =========================================================
 KPI_TARGETS_CONFIG = {
     "REG": {
@@ -219,27 +220,23 @@ KPI_TARGETS_CONFIG = {
             "A": {"H+0": 95.0, "H+1": 98.0},
             "B": {"H+1": 95.0, "H+2": 98.0},
             "C": {"H+1": 95.0, "H+2": 98.0},
-            "D": {"H+2": 95.0, "H+3": 98.0},
         },
         "COD": {
             "A": {"H+1": 90.0, "H+3": 95.0},
             "B": {"H+2": 90.0, "H+4": 95.0},
             "C": {"H+2": 90.0, "H+4": 95.0},
-            "D": {"H+3": 90.0, "H+5": 95.0},
         },
     },
     "JTR": {
         "Non COD": {
-            "A": {"H+1": 90.0, "H+2": 95.0},
-            "B": {"H+2": 90.0, "H+3": 95.0},
-            "C": {"H+2": 90.0, "H+3": 95.0},
-            "D": {"H+3": 90.0, "H+4": 95.0},
+            "A": {"H+0": 95.0, "H+1": 98.0},
+            "B": {"H+1": 95.0, "H+2": 98.0},
+            "C": {"H+2": 95.0, "H+3": 98.0},
         },
         "COD": {
-            "A": {"H+2": 90.0, "H+4": 95.0},
-            "B": {"H+3": 90.0, "H+5": 95.0},
-            "C": {"H+3": 90.0, "H+5": 95.0},
-            "D": {"H+4": 90.0, "H+6": 95.0},
+            "A": {"H+1": 90.0, "H+3": 95.0},
+            "B": {"H+2": 90.0, "H+4": 95.0},
+            "C": {"H+2": 90.0, "H+4": 95.0},
         },
     },
     "CTC": {"H+0": 95.0, "H+1": 99.0},
@@ -370,12 +367,6 @@ def render_kpi_card(
 
 
 def get_kpi_status_visual(actual_pct, target_pct):
-    """
-    Menentukan warna & label status card berdasarkan capaian vs target KPI:
-    - Hijau (#28a745): >= Target KPI
-    - Kuning (#ffc107): Warning (Target - 5% <= Capaian < Target)
-    - Merah (#dc3545): Below Target (Capaian < Target - 5%)
-    """
     diff = actual_pct - target_pct
     if actual_pct >= target_pct:
         return ("#28a745", f"ON TARGET ({diff:+.2f}%)", "#4ade80")
@@ -389,12 +380,8 @@ def get_kpi_status_visual(actual_pct, target_pct):
 # HELPER KPI TARGET & ALERT COLOR ENGINE (RUNNING-IN-TOTAL)
 # =========================================================
 def get_kpi_targets_for_row(mode, zona_code, pay_mode="Non COD", service_group="REG"):
-    """
-    Mengembalikan dict {bucket_name: target_pct} sesuai kombinasi Service (REG vs JTR),
-    Type Kiriman (Non COD vs COD), dan Zona (A, B, C, D).
-    """
     z = str(zona_code).strip().upper()
-    if z not in ("A", "B", "C", "D"):
+    if z not in ("A", "B", "C"):
         z = "B"
 
     if mode in ("CTC", "YES"):
@@ -527,7 +514,7 @@ try:
         )
         zon = (
             con.execute(
-                "SELECT DISTINCT Zona FROM v_inbound WHERE Zona IS NOT NULL ORDER BY 1"
+                "SELECT DISTINCT Zona FROM v_inbound WHERE Zona IS NOT NULL AND UPPER(TRIM(Zona)) != 'D' ORDER BY 1"
             )
             .fetchdf()["Zona"]
             .tolist()
@@ -1532,9 +1519,10 @@ try:
 
                 # =========================================================
                 # GRAFIK SLA LEAD TIME (% RUNNING IN TOTAL) + KPI HIGHLIGHTS
+                # PEMBAGI: TOTAL AWB TRANSACTION YANG ADA LAST_INBOUND
                 # =========================================================
                 st.markdown(
-                    '<div class="section-banner">🎯 Lead Time SLA Delivery (% Running in Total vs Target KPI)</div>',
+                    '<div class="section-banner">🎯 Lead Time SLA Delivery (% Running in Total vs Target KPI — Pembagi: Total Inbound TRANSACTION)</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -1545,23 +1533,24 @@ try:
                 else:
                     # ---------------------------------------------------------
                     # KPI HIGHLIGHT CARDS PER SERVICE (REG vs JTR vs CTC vs YES)
+                    # TANPA ZONA D
                     # ---------------------------------------------------------
-                    col_hl_title, col_hl_zona = st.columns([2.1, 1.4])
+                    col_hl_title, col_hl_zona = st.columns([2.1, 1.3])
                     with col_hl_title:
                         st.markdown(
-                            "#### 🏆 Highlight Capaian KPI Lead Time (% Running in Total)"
+                            "#### 🏆 Highlight Capaian KPI Lead Time (% Success dari Total Inbound TRANSACTION)"
                         )
                     with col_hl_zona:
                         hl_zona_opt = st.radio(
                             "Pilih Acuan Zona KPI Card:",
-                            ["All Zona", "Zona A", "Zona B", "Zona C", "Zona D"],
+                            ["All Zona", "Zona A", "Zona B", "Zona C"],
                             index=0,
                             horizontal=True,
                             key="hl_zona_selector",
                         )
 
                     hl_zona_sql = (
-                        "AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C', 'D')"
+                        "AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C')"
                         if hl_zona_opt == "All Zona"
                         else f"AND UPPER(TRIM(COALESCE(Zona, ''))) = '{hl_zona_opt.replace('Zona ', '')}'"
                     )
@@ -1581,47 +1570,51 @@ try:
                     jtr_cond = "(UPPER(COALESCE(SERVICE, '')) LIKE '%JTR%' OR UPPER(COALESCE(SERVICE, '')) LIKE '%TRC%')"
                     ctc_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%CTC%'"
                     yes_cond = "UPPER(COALESCE(SERVICE, '')) LIKE '%YES%'"
+                    succ_cond = "Status_Shipment = 'SUCCESS DELIVERY'"
 
                     hl_query = f"""
                         SELECT
                             -- REG Non COD
                             COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' THEN AWB END) AS reg_ncod_tot,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS reg_ncod_h0,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_ncod_h1,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_ncod_h2,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS reg_ncod_h0,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_ncod_h1,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_ncod_h2,
 
                             -- REG COD
                             COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' THEN AWB END) AS reg_cod_tot,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_cod_h1,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_cod_h2,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS reg_cod_h3,
-                            COUNT(DISTINCT CASE WHEN {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS reg_cod_h4,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS reg_cod_h1,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS reg_cod_h2,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS reg_cod_h3,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {reg_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS reg_cod_h4,
 
                             -- JTR (JTR & TRC) Non COD
                             COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' THEN AWB END) AS jtr_ncod_tot,
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_ncod_h1,
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_ncod_h2,
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_ncod_h3,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h0_in_sql}) THEN AWB END) AS jtr_ncod_h0,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_ncod_h1,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_ncod_h2,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'Non COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_ncod_h3,
 
                             -- JTR (JTR & TRC) COD
                             COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' THEN AWB END) AS jtr_cod_tot,
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_cod_h2,
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_cod_h3,
-                            COUNT(DISTINCT CASE WHEN {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS jtr_cod_h4,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h1_in_sql}) THEN AWB END) AS jtr_cod_h1,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h2_in_sql}) THEN AWB END) AS jtr_cod_h2,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h3_in_sql}) THEN AWB END) AS jtr_cod_h3,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {jtr_cond} AND payment_type = 'COD' AND lt_inbound_bucket IN ({h4_in_sql}) THEN AWB END) AS jtr_cod_h4,
 
-                            -- CTC (Entry -> Delivered)
+                            -- CTC (Entry -> Delivered | Pembagi: Total Inbound TRANSACTION)
                             COUNT(DISTINCT CASE WHEN {ctc_cond} THEN AWB END) AS ctc_tot,
-                            COUNT(DISTINCT CASE WHEN {ctc_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS ctc_h0,
-                            COUNT(DISTINCT CASE WHEN {ctc_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS ctc_h1,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS ctc_h0,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {ctc_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS ctc_h1,
 
-                            -- YES (Entry -> Delivered)
+                            -- YES (Entry -> Delivered | Pembagi: Total Inbound TRANSACTION)
                             COUNT(DISTINCT CASE WHEN {yes_cond} THEN AWB END) AS yes_tot,
-                            COUNT(DISTINCT CASE WHEN {yes_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS yes_h0,
-                            COUNT(DISTINCT CASE WHEN {yes_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS yes_h1
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h0_in_sql}) THEN AWB END) AS yes_h0,
+                            COUNT(DISTINCT CASE WHEN {succ_cond} AND {yes_cond} AND lt_entry_bucket IN ({h1_in_sql}) THEN AWB END) AS yes_h1
                         FROM v_inbound
                         {where_sql}
-                          AND Status_Shipment = 'SUCCESS DELIVERY'
                           AND Type_Shipment = 'TRANSACTION'
+                          AND Last_Inbound IS NOT NULL AND Last_Inbound != '-'
+                          AND TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') IS NOT NULL
                           {hl_zona_sql}
                     """
 
@@ -1634,36 +1627,35 @@ try:
                             num = float(hr[num_col] or 0)
                             return (num / den * 100.0) if den > 0 else 0.0, int(den)
 
-                        # Sesuaikan milestone KPI REG & JTR berdasarkan Zona yang dipilih
                         if hl_z_ref == "A":
                             reg_ncod_m1 = ("H+0", calc_pct("reg_ncod_h0", "reg_ncod_tot"), 95.0)
                             reg_ncod_m2 = ("H+1", calc_pct("reg_ncod_h1", "reg_ncod_tot"), 98.0)
                             reg_cod_m1 = ("H+1", calc_pct("reg_cod_h1", "reg_cod_tot"), 90.0)
                             reg_cod_m2 = ("H+3", calc_pct("reg_cod_h3", "reg_cod_tot"), 95.0)
 
-                            jtr_ncod_m1 = ("H+1", calc_pct("jtr_ncod_h1", "jtr_ncod_tot"), 90.0)
-                            jtr_ncod_m2 = ("H+2", calc_pct("jtr_ncod_h2", "jtr_ncod_tot"), 95.0)
-                            jtr_cod_m1 = ("H+2", calc_pct("jtr_cod_h2", "jtr_cod_tot"), 90.0)
-                            jtr_cod_m2 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 95.0)
-                        elif hl_z_ref in ("B", "C"):
+                            jtr_ncod_m1 = ("H+0", calc_pct("jtr_ncod_h0", "jtr_ncod_tot"), 95.0)
+                            jtr_ncod_m2 = ("H+1", calc_pct("jtr_ncod_h1", "jtr_ncod_tot"), 98.0)
+                            jtr_cod_m1 = ("H+1", calc_pct("jtr_cod_h1", "jtr_cod_tot"), 90.0)
+                            jtr_cod_m2 = ("H+3", calc_pct("jtr_cod_h3", "jtr_cod_tot"), 95.0)
+                        elif hl_z_ref == "B":
                             reg_ncod_m1 = ("H+1", calc_pct("reg_ncod_h1", "reg_ncod_tot"), 95.0)
                             reg_ncod_m2 = ("H+2", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 98.0)
                             reg_cod_m1 = ("H+2", calc_pct("reg_cod_h2", "reg_cod_tot"), 90.0)
                             reg_cod_m2 = ("H+4", calc_pct("reg_cod_h4", "reg_cod_tot"), 95.0)
 
-                            jtr_ncod_m1 = ("H+2", calc_pct("jtr_ncod_h2", "jtr_ncod_tot"), 90.0)
-                            jtr_ncod_m2 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 95.0)
-                            jtr_cod_m1 = ("H+3", calc_pct("jtr_cod_h3", "jtr_cod_tot"), 90.0)
+                            jtr_ncod_m1 = ("H+1", calc_pct("jtr_ncod_h1", "jtr_ncod_tot"), 95.0)
+                            jtr_ncod_m2 = ("H+2", calc_pct("jtr_ncod_h2", "jtr_ncod_tot"), 98.0)
+                            jtr_cod_m1 = ("H+2", calc_pct("jtr_cod_h2", "jtr_cod_tot"), 90.0)
                             jtr_cod_m2 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 95.0)
-                        else:  # Zona D
-                            reg_ncod_m1 = ("H+2", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 95.0)
-                            reg_ncod_m2 = ("H+3", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 98.0)
-                            reg_cod_m1 = ("H+3", calc_pct("reg_cod_h3", "reg_cod_tot"), 90.0)
+                        else:  # Zona C
+                            reg_ncod_m1 = ("H+1", calc_pct("reg_ncod_h1", "reg_ncod_tot"), 95.0)
+                            reg_ncod_m2 = ("H+2", calc_pct("reg_ncod_h2", "reg_ncod_tot"), 98.0)
+                            reg_cod_m1 = ("H+2", calc_pct("reg_cod_h2", "reg_cod_tot"), 90.0)
                             reg_cod_m2 = ("H+4", calc_pct("reg_cod_h4", "reg_cod_tot"), 95.0)
 
-                            jtr_ncod_m1 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 90.0)
-                            jtr_ncod_m2 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 95.0)
-                            jtr_cod_m1 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 90.0)
+                            jtr_ncod_m1 = ("H+2", calc_pct("jtr_ncod_h2", "jtr_ncod_tot"), 95.0)
+                            jtr_ncod_m2 = ("H+3", calc_pct("jtr_ncod_h3", "jtr_ncod_tot"), 98.0)
+                            jtr_cod_m1 = ("H+2", calc_pct("jtr_cod_h2", "jtr_cod_tot"), 90.0)
                             jtr_cod_m2 = ("H+4", calc_pct("jtr_cod_h4", "jtr_cod_tot"), 95.0)
 
                         def build_hl_card_html(card_title, milestone_lbl, pct_vol_tuple, target_val):
@@ -1674,7 +1666,7 @@ try:
                             return render_kpi_card(
                                 title=f"{card_title} ({milestone_lbl})",
                                 value_str=f"{actual_val:.2f}%",
-                                sub_str=f"Target KPI: <b>{target_val:.0f}%</b> &nbsp;|&nbsp; Vol: <b>{vol_cnt:,}</b> AWB",
+                                sub_str=f"Target: <b>{target_val:.0f}%</b> &nbsp;|&nbsp; Inbound TRX: <b>{vol_cnt:,}</b> AWB",
                                 accent_color=accent_c,
                                 pill_text=pill_txt,
                                 progress_pct=actual_val,
@@ -1766,6 +1758,8 @@ try:
 
                     # ---------------------------------------------------------
                     # FUNGSI MATRIX & S-CURVE % RUNNING IN TOTAL
+                    # PEMBAGI: TOTAL AWB TRANSACTION YANG ADA LAST_INBOUND
+                    # PEMBILANG: KUMULATIF AWB SUCCESS DELIVERY PER H+
                     # ---------------------------------------------------------
                     def render_running_total_sla_block(
                         block_key,
@@ -1817,37 +1811,42 @@ try:
                                 "JTR" if svc_rute_opt == "JTR (JTR & TRC)" else "REG"
                             )
 
-                            # Kotak Referensi Target KPI Dinamis sesuai pilihan Service (REG vs JTR)
+                            # Kotak Referensi Target KPI & Rumus Pembagi (Tanpa Zona D)
+                            denom_note = (
+                                "<br><span style='color:#38bdf8;'>📐 <b>Rumus:</b> (Akumulasi AWB <code>SUCCESS DELIVERY</code> s/d H+ terkait) &divide; "
+                                "(Total AWB <code>Type_Shipment = TRANSACTION</code> yang sudah memiliki <code>Last_Inbound</code>)</span>"
+                            )
                             if mode == "INBOUND":
                                 if svc_group_key == "JTR":
                                     kpi_info_html = (
                                         "🎯 <b>Target KPI Service JTR (JTR &amp; TRC) — Latest Inbound - Delivered:</b><br>"
-                                        "&bull; <b>Non COD:</b> Zona A (<b>H+1: 90%</b>, <b>H+2: 95%</b>) &nbsp;|&nbsp; "
-                                        "Zona B &amp; C (<b>H+2: 90%</b>, <b>H+3: 95%</b>) &nbsp;|&nbsp; "
-                                        "Zona D (<b>H+3: 90%</b>, <b>H+4: 95%</b>)<br>"
-                                        "&bull; <b>COD:</b> Zona A (<b>H+2: 90%</b>, <b>H+4: 95%</b>) &nbsp;|&nbsp; "
-                                        "Zona B &amp; C (<b>H+3: 90%</b>, <b>H+5: 95%</b>) &nbsp;|&nbsp; "
-                                        "Zona D (<b>H+4: 90%</b>, <b>H+6: 95%</b>)"
+                                        "&bull; <b>Non COD:</b> Zona A (<b>H+0: 95%</b>, <b>H+1: 98%</b>) &nbsp;|&nbsp; "
+                                        "Zona B (<b>H+1: 95%</b>, <b>H+2: 98%</b>) &nbsp;|&nbsp; "
+                                        "Zona C (<b>H+2: 95%</b>, <b>H+3: 98%</b>)<br>"
+                                        "&bull; <b>COD:</b> Zona A (<b>H+1: 90%</b>, <b>H+3: 95%</b>) &nbsp;|&nbsp; "
+                                        "Zona B &amp; C (<b>H+2: 90%</b>, <b>H+4: 95%</b>)"
+                                        + denom_note
                                     )
                                 else:
                                     kpi_info_html = (
-                                        "🎯 <b>Target KPI Service REG — Latest Inbound - Delivered:</b><br>"
+                                        "🎯 <b>Target KPI Service Reguler (REG) — Latest Inbound - Delivered:</b><br>"
                                         "&bull; <b>Non COD:</b> Zona A (<b>H+0: 95%</b>, <b>H+1: 98%</b>) &nbsp;|&nbsp; "
-                                        "Zona B &amp; C (<b>H+1: 95%</b>, <b>H+2: 98%</b>) &nbsp;|&nbsp; "
-                                        "Zona D (<b>H+2: 95%</b>, <b>H+3: 98%</b>)<br>"
+                                        "Zona B &amp; C (<b>H+1: 95%</b>, <b>H+2: 98%</b>)<br>"
                                         "&bull; <b>COD:</b> Zona A (<b>H+1: 90%</b>, <b>H+3: 95%</b>) &nbsp;|&nbsp; "
-                                        "Zona B &amp; C (<b>H+2: 90%</b>, <b>H+4: 95%</b>) &nbsp;|&nbsp; "
-                                        "Zona D (<b>H+3: 90%</b>, <b>H+5: 95%</b>)"
+                                        "Zona B &amp; C (<b>H+2: 90%</b>, <b>H+4: 95%</b>)"
+                                        + denom_note
                                     )
                             elif mode == "CTC":
                                 kpi_info_html = (
                                     "🎯 <b>Target KPI Entry/Handover - Delivered [CTC = Intracity]:</b> "
                                     "All Type Kiriman &amp; All Zone &rarr; <b>H+0: 95%</b> &nbsp;|&nbsp; <b>H+1: 99%</b>"
+                                    + denom_note
                                 )
                             else:
                                 kpi_info_html = (
                                     "🎯 <b>Target KPI Entry/Handover - Delivered [Service YES]:</b> "
                                     "All Type Kiriman &amp; All Zone &rarr; <b>H+0: 95%</b> &nbsp;|&nbsp; <b>H+1: 99%</b>"
+                                    + denom_note
                                 )
 
                             if mode == "INBOUND":
@@ -1863,8 +1862,9 @@ try:
                                     )
 
                             extra_clauses = [
-                                "Status_Shipment = 'SUCCESS DELIVERY'",
                                 "Type_Shipment = 'TRANSACTION'",
+                                "Last_Inbound IS NOT NULL AND Last_Inbound != '-'",
+                                "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M') IS NOT NULL",
                             ]
                             if service_filter_sql:
                                 extra_clauses.append(service_filter_sql)
@@ -1904,13 +1904,16 @@ try:
                                     {p_label_sql} AS periode,
                                     {p_sort_sql} AS sort_key,
                                     UPPER(TRIM(COALESCE(Zona, 'UNKNOWN'))) AS zona_code,
-                                    {bucket_col} AS lt_bucket,
+                                    CASE 
+                                        WHEN Status_Shipment = 'SUCCESS DELIVERY' AND {bucket_col} IS NOT NULL THEN {bucket_col}
+                                        ELSE 'NOT_DELIVERED'
+                                    END AS lt_bucket,
                                     COUNT(DISTINCT AWB) AS awb_cnt
                                 FROM v_inbound
                                 {where_sql}
                                   AND {extra_sql}
                                   AND {ts_expr} IS NOT NULL
-                                  AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C', 'D')
+                                  AND UPPER(TRIM(COALESCE(Zona, ''))) IN ('A', 'B', 'C')
                                 GROUP BY 1, 2, 3, 4
                                 ORDER BY sort_key ASC, zona_code ASC
                                 """
@@ -1918,7 +1921,7 @@ try:
 
                             if df_lt.empty:
                                 st.info(
-                                    "Tidak ada data kiriman `SUCCESS DELIVERY` (`Type_Shipment = TRANSACTION`) pada filter yang dipilih."
+                                    "Tidak ada data kiriman `Type_Shipment = TRANSACTION` yang sudah `Last_Inbound` pada filter yang dipilih."
                                 )
                                 return
 
@@ -1970,7 +1973,7 @@ try:
                                 )
                                 matrix_rows.append(parent_r)
 
-                                for z_code in ["A", "B", "C", "D"]:
+                                for z_code in ["A", "B", "C"]:
                                     df_pz = df_p[df_p["zona_code"] == z_code]
                                     if not df_pz.empty:
                                         child_r = compute_running_row(
@@ -1986,7 +1989,7 @@ try:
                             )
                             matrix_rows.append(gt_row)
 
-                            for z_code in ["A", "B", "C", "D"]:
+                            for z_code in ["A", "B", "C"]:
                                 df_z_all = df_lt[df_lt["zona_code"] == z_code]
                                 if not df_z_all.empty:
                                     z_summary = compute_running_row(
@@ -2013,8 +2016,9 @@ try:
                                 unsafe_allow_html=True,
                             )
 
+                            vol_col_header = "Vol Inbound"
                             table_headers = (
-                                [period_col_header, "Vol AWB"]
+                                [period_col_header, vol_col_header]
                                 + LT_RUNNING_BUCKETS
                                 + ["Total"]
                             )
@@ -2048,7 +2052,7 @@ try:
                                         col_font_list.append(
                                             "#38bdf8" if is_grand_total else "#f8fafc"
                                         )
-                                    elif col_name == "Vol AWB":
+                                    elif col_name == vol_col_header:
                                         vol_str = f"{int(r_data['VolAWB']):,}"
                                         col_txt_list.append(
                                             f"<b>{vol_str}</b>"
@@ -2086,7 +2090,7 @@ try:
                                 cell_fonts.append(col_font_list)
 
                             col_widths = (
-                                [1.45, 0.85]
+                                [1.45, 0.90]
                                 + [1.05, 1.05, 1.05]
                                 + [0.72] * 8
                                 + [0.80]
@@ -2149,7 +2153,6 @@ try:
                                         "Zona A": "#38bdf8",
                                         "Zona B": "#28a745",
                                         "Zona C": "#ffc107",
-                                        "Zona D": "#f43f5e",
                                     },
                                     labels={
                                         "Bucket": "",
@@ -2165,24 +2168,12 @@ try:
                                 )
                                 tgt_primary = (
                                     90.0
-                                    if (
-                                        mode == "INBOUND"
-                                        and (
-                                            pay_type_opt == "COD"
-                                            or svc_group_key == "JTR"
-                                        )
-                                    )
+                                    if (mode == "INBOUND" and pay_type_opt == "COD")
                                     else 95.0
                                 )
                                 tgt_secondary = (
                                     95.0
-                                    if (
-                                        mode == "INBOUND"
-                                        and (
-                                            pay_type_opt == "COD"
-                                            or svc_group_key == "JTR"
-                                        )
-                                    )
+                                    if (mode == "INBOUND" and pay_type_opt == "COD")
                                     else (98.0 if mode == "INBOUND" else 99.0)
                                 )
                                 fig_curve.add_hline(
@@ -2201,7 +2192,7 @@ try:
                                 )
                                 fig_curve.update_layout(
                                     title=dict(
-                                        text="<b>📈 Kurva Kumulatif % Running in Total per Zona</b>",
+                                        text="<b>📈 Kurva Kumulatif % Success Delivery per Zona (Pembagi: Total Inbound TRX)</b>",
                                         x=0,
                                         font=dict(size=14, color="#f8fafc"),
                                     ),
@@ -2233,7 +2224,12 @@ try:
 
                             export_df = df_matrix_disp.drop(
                                 columns=["ZonaRef", "IsParent"]
-                            ).rename(columns={"Label": period_col_header})
+                            ).rename(
+                                columns={
+                                    "Label": period_col_header,
+                                    "VolAWB": "Vol_Inbound_TRX",
+                                }
+                            )
                             st.download_button(
                                 label=f"📥 Download CSV {section_title.split('—')[0].strip()}",
                                 data=export_df.to_csv(index=False).encode("utf-8"),
@@ -2245,7 +2241,7 @@ try:
                     # 1. Grafik Utama: Latest Inbound -> TGL_UPDATE_STATUS_POD (REG vs JTR/TRC)
                     render_running_total_sla_block(
                         block_key="inbound_delivered",
-                        section_title="📊 1. SLA Lead Time: Latest Inbound - Delivered (REG vs JTR/TRC | TRANSACTION)",
+                        section_title="📊 1. SLA Lead Time: Latest Inbound - Delivered (REG vs JTR/TRC | Pembagi: Inbound TRANSACTION)",
                         mode="INBOUND",
                         base_ts_col="Last_Inbound",
                         bucket_col="lt_inbound_bucket",
@@ -2256,7 +2252,7 @@ try:
                     # 2. Grafik Khusus CTC (Intracity): TGL_ENTRY -> TGL_UPDATE_STATUS_POD
                     render_running_total_sla_block(
                         block_key="ctc_entry_delivered",
-                        section_title="📊 2. SLA Lead Time CTC (Intracity): TGL_ENTRY - Delivered (TRANSACTION | SUCCESS DELIVERY)",
+                        section_title="📊 2. SLA Lead Time CTC (Intracity): TGL_ENTRY - Delivered (Pembagi: Inbound TRANSACTION)",
                         mode="CTC",
                         base_ts_col="TGL_ENTRY",
                         bucket_col="lt_entry_bucket",
@@ -2267,7 +2263,7 @@ try:
                     # 3. Grafik Khusus YES: TGL_ENTRY -> TGL_UPDATE_STATUS_POD
                     render_running_total_sla_block(
                         block_key="yes_entry_delivered",
-                        section_title="📊 3. SLA Lead Time YES: TGL_ENTRY - Delivered (TRANSACTION | SUCCESS DELIVERY)",
+                        section_title="📊 3. SLA Lead Time YES: TGL_ENTRY - Delivered (Pembagi: Inbound TRANSACTION)",
                         mode="YES",
                         base_ts_col="TGL_ENTRY",
                         bucket_col="lt_entry_bucket",
