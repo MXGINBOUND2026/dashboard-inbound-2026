@@ -403,6 +403,30 @@ def get_kpi_targets_for_row(mode, zona_code, pay_mode="Non COD", service_group="
     return expanded_targets
 
 
+def get_final_milestone_info(
+    mode, zona_code, pay_mode="Non COD", service_group="REG", svc_display="REG"
+):
+    z = str(zona_code).strip().upper()
+    if z not in ("A", "B", "C"):
+        z = "B"
+
+    if mode in ("CTC", "YES"):
+        raw_t = KPI_TARGETS_CONFIG[mode]
+        prefix = mode
+    else:
+        svc_key = "JTR" if service_group == "JTR" else "REG"
+        pay_key = "COD" if pay_mode == "COD" else "Non COD"
+        raw_t = KPI_TARGETS_CONFIG[svc_key][pay_key][z]
+        svc_lbl = "REG & JTR" if svc_display == "All" else svc_key
+        pay_lbl = pay_mode if pay_mode in ("Non COD", "COD") else "All"
+        prefix = f"{svc_lbl} {pay_lbl}"
+
+    last_bucket = list(raw_t.keys())[-1]
+    last_target = float(raw_t[last_bucket])
+    legend_name = f"{prefix}: Zona {z} {last_bucket}:{int(last_target)}%"
+    return last_bucket, last_target, legend_name
+
+
 def evaluate_kpi_cell_style(val_pct, bucket_name, targets_dict, is_parent_row=False):
     if pd.isna(val_pct):
         return ("#0f172a" if is_parent_row else "#1e293b", "#64748b")
@@ -1794,8 +1818,8 @@ try:
                     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
                     # ---------------------------------------------------------
-                    # FUNGSI MATRIX & S-CURVE % RUNNING IN TOTAL
-                    # MENDUKUNG DRILLDOWN ZONA & KECAMATAN + MULTI-SELECT PERIODE
+                    # FUNGSI MATRIX & PROGRESS SUCCESS RATE LINE CHART
+                    # MENDUKUNG DRILLDOWN ZONA & KECAMATAN + DEFAULT 7 PERIODE TERAKHIR
                     # BERLAKU UNTUK INBOUND (REG/JTR), CTC, DAN YES
                     # ---------------------------------------------------------
                     def render_running_total_sla_block(
@@ -1808,7 +1832,7 @@ try:
                         default_expanded=True,
                     ):
                         with st.expander(section_title, expanded=default_expanded):
-                            # Baris Kontrol 1: Parameter Periode + Multi-Select Periode Dinamis
+                            # Baris Kontrol 1: Parameter Periode + Multi-Select Periode Dinamis (Default 7 Terakhir)
                             col_p1, col_p2 = st.columns([1.3, 1.7])
                             with col_p1:
                                 period_granularity = st.radio(
@@ -1893,25 +1917,21 @@ try:
                             extra_sql = " AND ".join(extra_clauses)
                             ts_expr = f"TRY_STRPTIME({base_ts_col}, '%m/%d/%Y %H:%M')"
 
-                            # Format label periode:
-                            # Tanggal = 1 - Jan, 2 - Jan, dst.
-                            # Week = Week 1, Week 2, dst.
-                            # Month = January, February, March, dst.
                             if period_granularity == "Tanggal (Daily)":
                                 p_label_sql = f"CONCAT(CAST(CAST(EXTRACT(DAY FROM {ts_expr}) AS INTEGER) AS STRING), ' - ', STRFTIME({ts_expr}, '%b'))"
                                 p_sort_sql = f"CAST({ts_expr} AS DATE)"
                                 period_col_header = "TANGGAL"
-                                msel_label = "🗓️ Pilih Tanggal (Multi-Select, contoh: 1 - Jan, 2 - Jan):"
+                                msel_label = "🗓️ Pilih Tanggal (Default: 7 Hari Terakhir):"
                             elif period_granularity == "Week (Weekly)":
                                 p_label_sql = f"CONCAT('Week ', CAST(CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER) AS STRING))"
                                 p_sort_sql = f"CAST(EXTRACT(WEEK FROM {ts_expr}) AS INTEGER)"
                                 period_col_header = "WEEK of YEAR"
-                                msel_label = "🗓️ Pilih Week (Multi-Select, contoh: Week 1, Week 2):"
+                                msel_label = "🗓️ Pilih Week (Default: 7 Week Terakhir):"
                             else:
                                 p_label_sql = f"STRFTIME({ts_expr}, '%B')"
                                 p_sort_sql = f"STRFTIME({ts_expr}, '%Y-%m')"
                                 period_col_header = "MONTH"
-                                msel_label = "🗓️ Pilih Month (Multi-Select, contoh: January, February):"
+                                msel_label = "🗓️ Pilih Month (Default: 7 Month Terakhir):"
 
                             df_lt = run_query(
                                 f"""
@@ -1948,14 +1968,31 @@ try:
                                 .sort_values("sort_key")
                             )
                             period_opt_list = avail_periods_df["periode"].tolist()
+                            default_7_periods = (
+                                period_opt_list[-7:]
+                                if len(period_opt_list) > 7
+                                else period_opt_list
+                            )
+
+                            msel_key = f"msel_{block_key}_{period_granularity}"
+                            if msel_key in st.session_state:
+                                valid_saved = [
+                                    p
+                                    for p in st.session_state[msel_key]
+                                    if p in period_opt_list
+                                ]
+                                if not valid_saved and period_opt_list:
+                                    st.session_state[msel_key] = default_7_periods
+                                else:
+                                    st.session_state[msel_key] = valid_saved
 
                             with col_p2:
                                 selected_periods = st.multiselect(
                                     msel_label,
                                     options=period_opt_list,
-                                    default=[],
-                                    placeholder="Semua Periode (Klik untuk pilih satu atau beberapa)",
-                                    key=f"msel_{block_key}_{period_granularity}",
+                                    default=default_7_periods,
+                                    placeholder="Pilih satu atau beberapa periode (kosongkan = semua)",
+                                    key=msel_key,
                                 )
 
                             if selected_periods:
@@ -2077,15 +2114,14 @@ try:
                                 return row_vals
 
                             matrix_rows = []
-                            curve_rows = []
+                            periods_df = (
+                                df_lt[["periode", "sort_key"]]
+                                .drop_duplicates()
+                                .sort_values("sort_key")
+                            )
 
                             if drilldown_mode == "Periode ▸ Zona":
                                 first_col_header = period_col_header
-                                periods_df = (
-                                    df_lt[["periode", "sort_key"]]
-                                    .drop_duplicates()
-                                    .sort_values("sort_key")
-                                )
                                 for _, p_row in periods_df.iterrows():
                                     p_name = p_row["periode"]
                                     df_p = df_lt[df_lt["periode"] == p_name]
@@ -2109,11 +2145,6 @@ try:
 
                             elif drilldown_mode == "Periode ▸ Zona ▸ Kecamatan":
                                 first_col_header = f"{period_col_header} / ZONA / KECAMATAN"
-                                periods_df = (
-                                    df_lt[["periode", "sort_key"]]
-                                    .drop_duplicates()
-                                    .sort_values("sort_key")
-                                )
                                 for _, p_row in periods_df.iterrows():
                                     p_name = p_row["periode"]
                                     df_p = df_lt[df_lt["periode"] == p_name]
@@ -2198,21 +2229,6 @@ try:
                                 df_lt, "TOTAL KESELURUHAN", "B", row_level=0
                             )
                             matrix_rows.append(gt_row)
-
-                            for z_code in ["A", "B", "C"]:
-                                df_z_all = df_lt[df_lt["zona_code"] == z_code]
-                                if not df_z_all.empty:
-                                    z_summary = compute_running_row(
-                                        df_z_all, f"Zona {z_code}", z_code, 1
-                                    )
-                                    for b in LT_RUNNING_BUCKETS:
-                                        curve_rows.append(
-                                            {
-                                                "Zona": f"Zona {z_code}",
-                                                "Bucket": b,
-                                                "RunningPct": round(z_summary[b], 2),
-                                            }
-                                        )
 
                             df_matrix_disp = pd.DataFrame(matrix_rows)
 
@@ -2365,69 +2381,125 @@ try:
                             )
                             st.plotly_chart(fig_lt_table, use_container_width=True)
 
-                            if curve_rows:
-                                df_curve = pd.DataFrame(curve_rows)
-                                fig_curve = px.line(
-                                    df_curve,
-                                    x="Bucket",
-                                    y="RunningPct",
-                                    color="Zona",
-                                    markers=True,
-                                    text="RunningPct",
-                                    color_discrete_map={
-                                        "Zona A": "#38bdf8",
-                                        "Zona B": "#28a745",
-                                        "Zona C": "#ffc107",
-                                    },
-                                    labels={
-                                        "Bucket": "",
-                                        "RunningPct": "% Running in Total",
-                                    },
+                            # ---------------------------------------------------------
+                            # GRAFIK GARIS: PROGRESS SUCCESS RATE (SESUAI PERIODE DIPILIH)
+                            # LEGEND SESUAI CAPAIAN TARGET MASING-MASING ZONA
+                            # ---------------------------------------------------------
+                            ordered_periods_chart = periods_df["periode"].tolist()
+                            zona_palette = {
+                                "A": "#38bdf8",
+                                "B": "#28a745",
+                                "C": "#ffc107",
+                            }
+                            fig_curve = go.Figure()
+                            target_line_vals = set()
+                            has_any_series = False
+
+                            for z_code in ["A", "B", "C"]:
+                                df_z_slice = df_lt[df_lt["zona_code"] == z_code]
+                                if df_z_slice.empty:
+                                    continue
+
+                                m_bucket, m_target, leg_lbl = get_final_milestone_info(
+                                    mode=mode,
+                                    zona_code=z_code,
+                                    pay_mode=pay_type_opt,
+                                    service_group=svc_group_key,
+                                    svc_display=svc_rute_opt,
                                 )
-                                fig_curve.update_traces(
-                                    line=dict(width=2.8),
-                                    marker=dict(size=7),
-                                    texttemplate="%{text:.1f}%",
-                                    textposition="top center",
-                                    textfont=dict(size=10),
+                                target_line_vals.add(m_target)
+
+                                y_vals = []
+                                text_vals = []
+                                custom_vols = []
+                                for p_name in ordered_periods_chart:
+                                    df_pz_p = df_z_slice[
+                                        df_z_slice["periode"] == p_name
+                                    ]
+                                    if df_pz_p.empty:
+                                        y_vals.append(None)
+                                        text_vals.append("")
+                                        custom_vols.append(0)
+                                    else:
+                                        r_calc = compute_running_row(
+                                            df_pz_p, p_name, z_code, 1
+                                        )
+                                        val_pct = round(float(r_calc[m_bucket]), 2)
+                                        y_vals.append(val_pct)
+                                        text_vals.append(f"{val_pct:.1f}%")
+                                        custom_vols.append(int(r_calc["VolAWB"]))
+
+                                has_any_series = True
+                                fig_curve.add_trace(
+                                    go.Scatter(
+                                        x=ordered_periods_chart,
+                                        y=y_vals,
+                                        mode="lines+markers+text",
+                                        name=leg_lbl,
+                                        text=text_vals,
+                                        textposition="top center",
+                                        textfont=dict(
+                                            size=10, color=zona_palette[z_code]
+                                        ),
+                                        line=dict(
+                                            width=2.8, color=zona_palette[z_code]
+                                        ),
+                                        marker=dict(
+                                            size=7, color=zona_palette[z_code]
+                                        ),
+                                        customdata=custom_vols,
+                                        connectgaps=False,
+                                        hovertemplate=(
+                                            f"<b>{leg_lbl}</b><br>"
+                                            "Periode: %{x}<br>"
+                                            f"Capaian {m_bucket}: <b>%{{y:.2f}}%</b><br>"
+                                            "Inbound Shipment: %{customdata:,} AWB<extra></extra>"
+                                        ),
+                                    )
                                 )
-                                tgt_primary = (
-                                    90.0
-                                    if (mode == "INBOUND" and pay_type_opt == "COD")
-                                    else 95.0
+
+                            if has_any_series:
+                                for idx_t, t_val in enumerate(sorted(target_line_vals)):
+                                    fig_curve.add_hline(
+                                        y=t_val,
+                                        line_dash="dash" if idx_t == 0 else "dot",
+                                        line_color="#ffc107"
+                                        if idx_t == 0
+                                        else "#28a745",
+                                        annotation_text=f"Target KPI: {t_val:.0f}%",
+                                        annotation_font_color="#ffc107"
+                                        if idx_t == 0
+                                        else "#28a745",
+                                    )
+
+                                enable_h_scroll = len(ordered_periods_chart) > 10
+                                xaxis_cfg = dict(
+                                    categoryorder="array",
+                                    categoryarray=ordered_periods_chart,
+                                    tickfont=dict(color="#cbd5e1", size=11),
+                                    showgrid=False,
                                 )
-                                tgt_secondary = (
-                                    95.0
-                                    if (mode == "INBOUND" and pay_type_opt == "COD")
-                                    else (98.0 if mode == "INBOUND" else 99.0)
-                                )
-                                fig_curve.add_hline(
-                                    y=tgt_primary,
-                                    line_dash="dash",
-                                    line_color="#ffc107",
-                                    annotation_text=f"KPI Milestone 1: {tgt_primary:.0f}%",
-                                    annotation_font_color="#ffc107",
-                                )
-                                fig_curve.add_hline(
-                                    y=tgt_secondary,
-                                    line_dash="dot",
-                                    line_color="#28a745",
-                                    annotation_text=f"KPI Milestone 2: {tgt_secondary:.0f}%",
-                                    annotation_font_color="#28a745",
-                                )
+                                if enable_h_scroll:
+                                    xaxis_cfg["range"] = [
+                                        len(ordered_periods_chart) - 10,
+                                        len(ordered_periods_chart) - 0.5,
+                                    ]
+                                    xaxis_cfg["rangeslider"] = dict(
+                                        visible=True,
+                                        thickness=0.06,
+                                        bgcolor="rgba(30, 41, 59, 0.8)",
+                                    )
+
                                 fig_curve.update_layout(
                                     title=dict(
-                                        text="<b>📈 Kurva Kumulatif % Success Delivery per Zona (Pembagi: Total Inbound Shipment)</b>",
+                                        text="<b>📈 Progress Success Rate</b>",
                                         x=0,
-                                        font=dict(size=14, color="#f8fafc"),
+                                        font=dict(size=15, color="#f8fafc"),
                                     ),
-                                    xaxis=dict(
-                                        categoryorder="array",
-                                        categoryarray=LT_RUNNING_BUCKETS,
-                                        tickfont=dict(color="#cbd5e1", size=11),
-                                    ),
+                                    xaxis=xaxis_cfg,
                                     yaxis=dict(
-                                        range=[0, 106],
+                                        title="% Progress Success Rate",
+                                        range=[0, 107],
                                         showgrid=True,
                                         gridcolor="rgba(148, 163, 184, 0.15)",
                                         tickfont=dict(color="#cbd5e1"),
@@ -2438,12 +2510,17 @@ try:
                                         y=1.02,
                                         xanchor="right",
                                         x=1,
-                                        font=dict(color="#f8fafc"),
+                                        font=dict(color="#f8fafc", size=11),
                                     ),
                                     plot_bgcolor="rgba(15, 23, 42, 0.7)",
                                     paper_bgcolor="rgba(15, 23, 42, 0.7)",
-                                    margin=dict(l=15, r=15, t=50, b=20),
-                                    height=330,
+                                    margin=dict(
+                                        l=15,
+                                        r=15,
+                                        t=55,
+                                        b=35 if enable_h_scroll else 20,
+                                    ),
+                                    height=360 if enable_h_scroll else 330,
                                 )
                                 st.plotly_chart(fig_curve, use_container_width=True)
 
