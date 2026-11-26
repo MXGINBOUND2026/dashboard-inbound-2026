@@ -2576,7 +2576,7 @@ try:
                 st.markdown("---")
 
                 # =========================================================
-                # GRAFIK TREN VOLUME INBOUND + 1-CLICK PERIODE SELECTOR
+                # GRAFIK TREN VOLUME INBOUND + BREAKDOWN SERVICE & COD/NON-COD
                 # =========================================================
                 c_tr_1, c_tr_2 = st.columns([1.8, 1.4])
                 with c_tr_1:
@@ -2607,6 +2607,51 @@ try:
                             key="trend_period_selector_radio",
                         )
 
+                # Baris Kontrol Breakdown & Filter Cepat (Service & COD / Non-COD)
+                col_bd_mode, col_bd_svc, col_bd_pay = st.columns([1.55, 1.35, 1.0])
+                breakdown_options = [
+                    "Total (All)",
+                    "Per Service",
+                    "Per COD/Non-COD",
+                    "Service & COD/Non-COD",
+                ]
+                with col_bd_mode:
+                    if hasattr(st, "segmented_control"):
+                        trend_breakdown_mode = st.segmented_control(
+                            "🔀 Mode Breakdown:",
+                            options=breakdown_options,
+                            default="Total (All)",
+                            key="trend_breakdown_mode_seg",
+                        )
+                        if not trend_breakdown_mode:
+                            trend_breakdown_mode = "Total (All)"
+                    else:
+                        trend_breakdown_mode = st.radio(
+                            "🔀 Mode Breakdown:",
+                            options=breakdown_options,
+                            index=0,
+                            horizontal=True,
+                            key="trend_breakdown_mode_radio",
+                        )
+
+                with col_bd_svc:
+                    selected_trend_svcs = st.multiselect(
+                        "🚚 Filter Service (Kosongkan = All):",
+                        options=["REG", "JTR", "CTC", "YES", "OTHER"],
+                        default=[],
+                        placeholder="Semua Service (All)",
+                        key="trend_svc_quick_filter",
+                    )
+
+                with col_bd_pay:
+                    selected_trend_pay = st.radio(
+                        "💳 Filter Payment:",
+                        options=["All", "Non COD", "COD"],
+                        index=0,
+                        horizontal=True,
+                        key="trend_pay_quick_filter",
+                    )
+
                 enable_day_filter = st.checkbox(
                     "📌 Aktifkan Filter Rentang Tanggal (Day Range 1–31)", value=False
                 )
@@ -2628,82 +2673,250 @@ try:
                 else:
                     day_filter_clause = ""
 
+                svc_group_sql = """
+                    CASE 
+                        WHEN UPPER(COALESCE(SERVICE, '')) LIKE '%REG%' THEN 'REG'
+                        WHEN UPPER(COALESCE(SERVICE, '')) LIKE '%JTR%' OR UPPER(COALESCE(SERVICE, '')) LIKE '%TRC%' THEN 'JTR'
+                        WHEN UPPER(COALESCE(SERVICE, '')) LIKE '%CTC%' THEN 'CTC'
+                        WHEN UPPER(COALESCE(SERVICE, '')) LIKE '%YES%' THEN 'YES'
+                        ELSE 'OTHER'
+                    END
+                """
+                pay_group_sql = """
+                    CASE 
+                        WHEN UPPER(TRIM(COALESCE(payment_type, ''))) = 'COD' THEN 'COD'
+                        ELSE 'Non COD'
+                    END
+                """
+
+                quick_filter_clauses = []
+                if selected_trend_svcs:
+                    svc_in_str = ", ".join(
+                        [f"'{s}'" for s in selected_trend_svcs]
+                    )
+                    quick_filter_clauses.append(
+                        f"({svc_group_sql}) IN ({svc_in_str})"
+                    )
+                if selected_trend_pay in ("Non COD", "COD"):
+                    quick_filter_clauses.append(
+                        f"({pay_group_sql}) = '{selected_trend_pay}'"
+                    )
+
+                quick_filter_sql = (
+                    "AND " + " AND ".join(quick_filter_clauses)
+                    if quick_filter_clauses
+                    else ""
+                )
+
                 sql_date_expr = "TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')"
 
                 if trend_view_mode == "Harian (Daily)":
                     sql_period_expr = f"CAST({sql_date_expr} AS DATE)"
                     sql_trend_group = f"STRFTIME({sql_date_expr}, '%d %b %Y') AS periode, {sql_period_expr} as sort_key"
-                    group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
                 elif trend_view_mode == "Mingguan (Weekly)":
                     sql_period_expr = f"EXTRACT(WEEK FROM {sql_date_expr})"
                     sql_trend_group = f"CONCAT('Week ', CAST(CAST({sql_period_expr} AS INTEGER) AS STRING)) AS periode, {sql_period_expr} as sort_key"
-                    group_by_clause = (
-                        f"AND {sql_date_expr} IS NOT NULL GROUP BY 1, 2 ORDER BY sort_key ASC"
-                    )
                 else:
                     sql_period_expr = f"STRFTIME({sql_date_expr}, '%Y-%m')"
                     sql_trend_group = f"STRFTIME({sql_date_expr}, '%b %Y') AS periode, {sql_period_expr} as sort_key"
-                    group_by_clause = "GROUP BY 1, 2 ORDER BY sort_key ASC"
 
-                df_inbound_trend = run_query(
-                    f"""
-                    SELECT {sql_trend_group}, COUNT(DISTINCT AWB) AS total_awb
-                    FROM v_inbound
-                    {where_sql_trend} AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = 2026 {day_filter_clause}
-                    {group_by_clause}
-                    """
-                )
+                if trend_breakdown_mode == "Total (All)":
+                    df_inbound_trend = run_query(
+                        f"""
+                        SELECT {sql_trend_group}, COUNT(DISTINCT AWB) AS total_awb
+                        FROM v_inbound
+                        {where_sql_trend}
+                          AND {sql_date_expr} IS NOT NULL
+                          AND EXTRACT(YEAR FROM {sql_date_expr}) = 2026
+                          {day_filter_clause}
+                          {quick_filter_sql}
+                        GROUP BY 1, 2
+                        ORDER BY sort_key ASC
+                        """
+                    )
 
-                if not df_inbound_trend.empty:
-                    avg_vol = df_inbound_trend["total_awb"].mean()
-                    fig_inbound = px.area(
-                        df_inbound_trend,
-                        x="periode",
-                        y="total_awb",
-                        markers=True,
-                        labels={"periode": "", "total_awb": "Total AWB"},
-                    )
-                    fig_inbound.update_traces(
-                        line=dict(color="#38bdf8", width=3),
-                        fillcolor="rgba(56, 189, 248, 0.18)",
-                        marker=dict(
-                            size=6,
-                            color="#f8fafc",
-                            line=dict(width=2, color="#38bdf8"),
-                        ),
-                    )
-                    fig_inbound.add_hline(
-                        y=avg_vol,
-                        line_dash="dash",
-                        line_color="#ffc107",
-                        annotation_text=f"Rata-rata: {avg_vol:,.0f} AWB",
-                        annotation_font_color="#ffc107",
-                    )
-                    fig_inbound.update_layout(
-                        plot_bgcolor="rgba(15, 23, 42, 0.7)",
-                        paper_bgcolor="rgba(15, 23, 42, 0.7)",
-                        font=dict(color="#cbd5e1"),
-                        xaxis=dict(showgrid=False),
-                        yaxis=dict(
-                            showgrid=True, gridcolor="rgba(148, 163, 184, 0.15)"
-                        ),
-                        margin=dict(l=15, r=15, t=25, b=15),
-                        height=340,
-                    )
-                    st.plotly_chart(fig_inbound, use_container_width=True)
+                    if not df_inbound_trend.empty:
+                        avg_vol = df_inbound_trend["total_awb"].mean()
+                        fig_inbound = px.area(
+                            df_inbound_trend,
+                            x="periode",
+                            y="total_awb",
+                            markers=True,
+                            labels={"periode": "", "total_awb": "Total AWB"},
+                        )
+                        fig_inbound.update_traces(
+                            line=dict(color="#38bdf8", width=3),
+                            fillcolor="rgba(56, 189, 248, 0.18)",
+                            marker=dict(
+                                size=6,
+                                color="#f8fafc",
+                                line=dict(width=2, color="#38bdf8"),
+                            ),
+                        )
+                        fig_inbound.add_hline(
+                            y=avg_vol,
+                            line_dash="dash",
+                            line_color="#ffc107",
+                            annotation_text=f"Rata-rata: {avg_vol:,.0f} AWB",
+                            annotation_font_color="#ffc107",
+                        )
+                        fig_inbound.update_layout(
+                            plot_bgcolor="rgba(15, 23, 42, 0.7)",
+                            paper_bgcolor="rgba(15, 23, 42, 0.7)",
+                            font=dict(color="#cbd5e1"),
+                            xaxis=dict(showgrid=False),
+                            yaxis=dict(
+                                showgrid=True, gridcolor="rgba(148, 163, 184, 0.15)"
+                            ),
+                            margin=dict(l=15, r=15, t=25, b=15),
+                            height=340,
+                        )
+                        st.plotly_chart(fig_inbound, use_container_width=True)
+                    else:
+                        st.info("Tidak ada data tren inbound pada periode yang dipilih.")
+
                 else:
-                    st.info("Tidak ada data tren inbound pada periode yang dipilih.")
+                    if trend_breakdown_mode == "Per Service":
+                        bd_col_sql = f"({svc_group_sql})"
+                    elif trend_breakdown_mode == "Per COD/Non-COD":
+                        bd_col_sql = f"({pay_group_sql})"
+                    else:
+                        bd_col_sql = f"CONCAT(({svc_group_sql}), ' - ', ({pay_group_sql}))"
+
+                    df_inbound_bd = run_query(
+                        f"""
+                        SELECT
+                            {sql_trend_group},
+                            {bd_col_sql} AS breakdown_grp,
+                            COUNT(DISTINCT AWB) AS total_awb
+                        FROM v_inbound
+                        {where_sql_trend}
+                          AND {sql_date_expr} IS NOT NULL
+                          AND EXTRACT(YEAR FROM {sql_date_expr}) = 2026
+                          {day_filter_clause}
+                          {quick_filter_sql}
+                        GROUP BY 1, 2, 3
+                        ORDER BY sort_key ASC, total_awb DESC
+                        """
+                    )
+
+                    if not df_inbound_bd.empty:
+                        periods_ordered_chart = (
+                            df_inbound_bd[["periode", "sort_key"]]
+                            .drop_duplicates()
+                            .sort_values("sort_key")["periode"]
+                            .tolist()
+                        )
+                        grp_order = (
+                            df_inbound_bd.groupby("breakdown_grp")["total_awb"]
+                            .sum()
+                            .sort_values(ascending=False)
+                            .index.tolist()
+                        )
+
+                        bd_color_map = {
+                            "REG": "#38bdf8",
+                            "JTR": "#a855f7",
+                            "CTC": "#22c55e",
+                            "YES": "#f59e0b",
+                            "OTHER": "#94a3b8",
+                            "Non COD": "#38bdf8",
+                            "COD": "#f97316",
+                            "REG - Non COD": "#38bdf8",
+                            "REG - COD": "#f97316",
+                            "JTR - Non COD": "#a855f7",
+                            "JTR - COD": "#ec4899",
+                            "CTC - Non COD": "#22c55e",
+                            "CTC - COD": "#14b8a6",
+                            "YES - Non COD": "#eab308",
+                            "YES - COD": "#ef4444",
+                            "OTHER - Non COD": "#94a3b8",
+                            "OTHER - COD": "#64748b",
+                        }
+
+                        fig_inbound_bd = px.line(
+                            df_inbound_bd,
+                            x="periode",
+                            y="total_awb",
+                            color="breakdown_grp",
+                            markers=True,
+                            category_orders={
+                                "periode": periods_ordered_chart,
+                                "breakdown_grp": grp_order,
+                            },
+                            color_discrete_map=bd_color_map,
+                            labels={
+                                "periode": "",
+                                "total_awb": "Total AWB",
+                                "breakdown_grp": "Breakdown",
+                            },
+                        )
+                        fig_inbound_bd.update_traces(
+                            line=dict(width=2.6),
+                            marker=dict(size=6),
+                            hovertemplate="<b>%{fullData.name}</b><br>Periode: %{x}<br>Volume: <b>%{y:,} AWB</b><extra></extra>",
+                        )
+                        fig_inbound_bd.update_layout(
+                            plot_bgcolor="rgba(15, 23, 42, 0.7)",
+                            paper_bgcolor="rgba(15, 23, 42, 0.7)",
+                            font=dict(color="#cbd5e1"),
+                            hovermode="x unified",
+                            xaxis=dict(showgrid=False),
+                            yaxis=dict(
+                                showgrid=True,
+                                gridcolor="rgba(148, 163, 184, 0.15)",
+                            ),
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1,
+                                title=dict(text=""),
+                                font=dict(color="#f8fafc", size=11),
+                            ),
+                            margin=dict(l=15, r=15, t=42, b=15),
+                            height=360,
+                        )
+                        st.plotly_chart(fig_inbound_bd, use_container_width=True)
+                    else:
+                        st.info("Tidak ada data tren inbound pada kombinasi filter yang dipilih.")
 
                 st.markdown("---")
-                st.subheader(f"📋 Tabel Produktivitas Cabang ({trend_view_mode})")
+                st.subheader(
+                    f"📋 Tabel Produktivitas Cabang ({trend_view_mode} — {trend_breakdown_mode})"
+                )
+
+                if trend_breakdown_mode == "Total (All)":
+                    pivot_select_dims = "Cabang"
+                    pivot_group_dims = "Cabang, period_raw"
+                elif trend_breakdown_mode == "Per Service":
+                    pivot_select_dims = f"Cabang, ({svc_group_sql}) AS Service"
+                    pivot_group_dims = f"Cabang, ({svc_group_sql}), period_raw"
+                elif trend_breakdown_mode == "Per COD/Non-COD":
+                    pivot_select_dims = f"Cabang, ({pay_group_sql}) AS Payment"
+                    pivot_group_dims = f"Cabang, ({pay_group_sql}), period_raw"
+                else:
+                    pivot_select_dims = f"Cabang, ({svc_group_sql}) AS Service, ({pay_group_sql}) AS Payment"
+                    pivot_group_dims = (
+                        f"Cabang, ({svc_group_sql}), ({pay_group_sql}), period_raw"
+                    )
 
                 df_pivot_raw = run_query(
                     f"""
-                    SELECT Cabang, {sql_period_expr} AS period_raw, COUNT(DISTINCT AWB) AS total_awb
+                    SELECT
+                        {pivot_select_dims},
+                        {sql_period_expr} AS period_raw,
+                        COUNT(DISTINCT AWB) AS total_awb
                     FROM v_inbound 
-                    {where_sql_trend} AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
-                      AND {sql_period_expr} IS NOT NULL AND EXTRACT(YEAR FROM TRY_STRPTIME(Last_Inbound, '%m/%d/%Y %H:%M')) = 2026 {day_filter_clause}
-                    GROUP BY Cabang, period_raw ORDER BY period_raw ASC
+                    {where_sql_trend}
+                      AND Cabang IN ('Malang', 'Batu', 'Blitar', 'Kepanjen', 'Bululawang', 'Turen')
+                      AND {sql_period_expr} IS NOT NULL
+                      AND EXTRACT(YEAR FROM {sql_date_expr}) = 2026
+                      {day_filter_clause}
+                      {quick_filter_sql}
+                    GROUP BY {pivot_group_dims}
+                    ORDER BY period_raw ASC
                     """
                 )
 
@@ -2734,34 +2947,110 @@ try:
                         "Turen",
                         "Bululawang",
                     ]
+                    svc_sort_order = ["REG", "JTR", "CTC", "YES", "OTHER"]
+                    pay_sort_order = ["Non COD", "COD"]
                     periods_ordered = df_pivot_raw["periode"].unique().tolist()
 
-                    pivot_data = []
-                    for cab in main_cabangs:
-                        row_dict = {"Cabang": cab}
-                        cab_df = df_pivot_raw[df_pivot_raw["Cabang"] == cab]
+                    def append_period_metrics(base_dict, slice_df):
                         prev_val = None
                         for p in periods_ordered:
-                            match_val = cab_df[cab_df["periode"] == p][
+                            match_val = slice_df[slice_df["periode"] == p][
                                 "total_awb"
                             ].values
                             curr_val = int(match_val[0]) if len(match_val) > 0 else 0
-                            row_dict[f"{p} (AWB)"] = curr_val
-                            row_dict[f"{p} (% Growth)"] = (
+                            base_dict[f"{p} (AWB)"] = curr_val
+                            base_dict[f"{p} (% Growth)"] = (
                                 f"{((curr_val - prev_val) / prev_val) * 100.0:+.2f}%"
                                 if prev_val and prev_val > 0
                                 else "0.00%"
                             )
                             prev_val = curr_val if curr_val > 0 else prev_val
-                        pivot_data.append(row_dict)
+                        return base_dict
+
+                    pivot_data = []
+                    for cab in main_cabangs:
+                        cab_df = df_pivot_raw[df_pivot_raw["Cabang"] == cab]
+                        if trend_breakdown_mode == "Total (All)":
+                            row_dict = append_period_metrics({"Cabang": cab}, cab_df)
+                            pivot_data.append(row_dict)
+
+                        elif trend_breakdown_mode == "Per Service":
+                            avail_svcs = [
+                                s
+                                for s in svc_sort_order
+                                if s in cab_df["Service"].unique()
+                            ]
+                            for svc_name in avail_svcs:
+                                sub_df = cab_df[cab_df["Service"] == svc_name]
+                                row_dict = append_period_metrics(
+                                    {"Cabang": cab, "Service": svc_name}, sub_df
+                                )
+                                pivot_data.append(row_dict)
+
+                        elif trend_breakdown_mode == "Per COD/Non-COD":
+                            avail_pays = [
+                                p
+                                for p in pay_sort_order
+                                if p in cab_df["Payment"].unique()
+                            ]
+                            for pay_name in avail_pays:
+                                sub_df = cab_df[cab_df["Payment"] == pay_name]
+                                row_dict = append_period_metrics(
+                                    {"Cabang": cab, "Payment": pay_name}, sub_df
+                                )
+                                pivot_data.append(row_dict)
+
+                        else:
+                            avail_svcs = [
+                                s
+                                for s in svc_sort_order
+                                if s in cab_df["Service"].unique()
+                            ]
+                            for svc_name in avail_svcs:
+                                svc_df = cab_df[cab_df["Service"] == svc_name]
+                                avail_pays = [
+                                    p
+                                    for p in pay_sort_order
+                                    if p in svc_df["Payment"].unique()
+                                ]
+                                for pay_name in avail_pays:
+                                    sub_df = svc_df[svc_df["Payment"] == pay_name]
+                                    row_dict = append_period_metrics(
+                                        {
+                                            "Cabang": cab,
+                                            "Service": svc_name,
+                                            "Payment": pay_name,
+                                        },
+                                        sub_df,
+                                    )
+                                    pivot_data.append(row_dict)
 
                     df_final_pivot = pd.DataFrame(pivot_data)
-                    st.dataframe(df_final_pivot, use_container_width=True, height=265)
+                    tbl_height = (
+                        265
+                        if trend_breakdown_mode == "Total (All)"
+                        else min(520, max(280, (len(df_final_pivot) + 1) * 35 + 10))
+                    )
+                    st.dataframe(
+                        df_final_pivot, use_container_width=True, height=tbl_height
+                    )
+
+                    safe_bd_tag = (
+                        trend_breakdown_mode.replace(" ", "_")
+                        .replace("/", "_")
+                        .replace("&", "dan")
+                        .replace("(", "")
+                        .replace(")", "")
+                    )
                     st.download_button(
-                        "📥 Download CSV Produktivitas Cabang (Pivot)",
+                        f"📥 Download CSV Produktivitas Cabang ({trend_breakdown_mode})",
                         df_final_pivot.to_csv(index=False).encode("utf-8"),
-                        "Produktivitas_Cabang_Pivot.csv",
+                        f"Produktivitas_Cabang_{safe_bd_tag}.csv",
                         "text/csv",
+                    )
+                else:
+                    st.info(
+                        "Tidak ada data produktivitas cabang pada kombinasi filter yang dipilih."
                     )
 
                 st.markdown("---")
