@@ -1277,13 +1277,52 @@ try:
                             if col not in pivot_matrix.columns:
                                 pivot_matrix[col] = 0
                         pivot_matrix = pivot_matrix[["Status_Shipment"] + AGING_ORDER]
-                        pivot_matrix["Grand Total"] = pivot_matrix[AGING_ORDER].sum(
-                            axis=1
+                        for col in AGING_ORDER:
+                            pivot_matrix[col] = pivot_matrix[col].astype(int)
+                        pivot_matrix["Grand Total"] = (
+                            pivot_matrix[AGING_ORDER].sum(axis=1).astype(int)
                         )
                         pivot_matrix = pivot_matrix.sort_values(
                             by="Grand Total", ascending=False
                         )
-                        st.dataframe(pivot_matrix, use_container_width=True)
+
+                        def highlight_above_h0_matrix(val):
+                            return (
+                                "color: #ff4d4d; font-weight: bold;"
+                                if isinstance(val, (int, float)) and val > 0
+                                else ""
+                            )
+
+                        above_h0_cols_matrix = [
+                            c
+                            for c in [
+                                "H+1",
+                                "H+2",
+                                "H+3",
+                                "H+4",
+                                "H+5",
+                                "H+6",
+                                "H+7",
+                                ">H+7",
+                            ]
+                            if c in pivot_matrix.columns
+                        ]
+                        fmt_cols_matrix = {
+                            c: (
+                                lambda v: ""
+                                if pd.isna(v) or v == 0
+                                else f"{int(v):,}"
+                            )
+                            for c in AGING_ORDER + ["Grand Total"]
+                            if c in pivot_matrix.columns
+                        }
+                        st.dataframe(
+                            pivot_matrix.style.format(fmt_cols_matrix).map(
+                                highlight_above_h0_matrix,
+                                subset=above_h0_cols_matrix,
+                            ),
+                            use_container_width=True,
+                        )
                     else:
                         st.info("Tidak ada data untuk kategori status tersebut.")
 
@@ -1324,7 +1363,11 @@ try:
                         for col in AGING_ORDER:
                             if col not in pivot_loc.columns:
                                 pivot_loc[col] = 0
-                        pivot_loc["Grand Total"] = pivot_loc[AGING_ORDER].sum(axis=1)
+                        for col in AGING_ORDER:
+                            pivot_loc[col] = pivot_loc[col].astype(int)
+                        pivot_loc["Grand Total"] = (
+                            pivot_loc[AGING_ORDER].sum(axis=1).astype(int)
+                        )
                         pivot_loc = pivot_loc.sort_values(
                             by="Grand Total", ascending=False
                         )
@@ -1333,16 +1376,34 @@ try:
                             return (
                                 "color: #ff4d4d; font-weight: bold;"
                                 if isinstance(val, (int, float)) and val > 0
-                                else "color: #888888;"
+                                else ""
                             )
 
                         red_alert_cols = [
                             c
-                            for c in ["H+3", "H+4", "H+5", "H+6", "H+7", ">H+7"]
+                            for c in [
+                                "H+1",
+                                "H+2",
+                                "H+3",
+                                "H+4",
+                                "H+5",
+                                "H+6",
+                                "H+7",
+                                ">H+7",
+                            ]
                             if c in pivot_loc.columns
                         ]
+                        fmt_cols_loc = {
+                            c: (
+                                lambda v: ""
+                                if pd.isna(v) or v == 0
+                                else f"{int(v):,}"
+                            )
+                            for c in AGING_ORDER + ["Grand Total"]
+                            if c in pivot_loc.columns
+                        }
                         st.dataframe(
-                            pivot_loc.style.map(
+                            pivot_loc.style.format(fmt_cols_loc).map(
                                 highlight_red_alert, subset=red_alert_cols
                             ),
                             use_container_width=True,
